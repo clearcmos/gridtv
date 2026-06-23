@@ -12,20 +12,20 @@
   "license": "MIT",
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
-    "@fastify/static": "^8.2.0",
-    "@fastify/websocket": "^11.1.0",
+    "@fastify/static": "^9.1.3",
+    "@fastify/websocket": "^11.2.0",
     "base-x": "^5.0.1",
-    "fastify": "^5.4.0",
-    "jsondiffpatch": "^0.7.3",
+    "fastify": "^5.8.5",
+    "jsondiffpatch": "^0.7.6",
     "lowdb": "^7.0.1",
-    "tsx": "^4.21.0",
-    "typescript": "~4.5.4",
-    "ws": "^8.18.2",
-    "yjs": "^13.6.21"
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "ws": "^8.21.0",
+    "yjs": "^13.6.31"
   },
   "devDependencies": {
-    "@tsconfig/node-ts": "^23.6.1",
-    "@tsconfig/node22": "^22.0.2",
-    "@tsconfig/recommended": "^1.0.8"
+    "@tsconfig/node-ts": "^23.6.4",
+    "@tsconfig/node22": "^22.0.5",
+    "@tsconfig/recommended": "^1.0.13"
   }
 }

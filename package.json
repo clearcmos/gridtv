@@ -12,8 +12,8 @@
     "packages/streamwall-control-ui"
   ],
   "devDependencies": {
-    "prettier": "^3.4.2",
-    "prettier-plugin-organize-imports": "^4.1.0",
+    "prettier": "^3.8.4",
+    "prettier-plugin-organize-imports": "^4.3.0",
     "typescript": "^6.0.3"
   }
 }

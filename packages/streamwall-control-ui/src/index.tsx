@@ -2,7 +2,7 @@ import '@fontsource/noto-sans'
 import Color from 'color'
 import { orderBy, range, truncate } from 'lodash-es'
 import { DateTime } from 'luxon'
-import { JSX } from 'preact'
+import { type ComponentProps, type JSX } from 'preact'
 import {
   useCallback,
   useEffect,
@@ -11,7 +11,7 @@ import {
   useState,
 } from 'preact/hooks'
 import { useHotkeys } from 'react-hotkeys-hook'
-import { IconType } from 'react-icons'
+import { type IconType } from 'react-icons'
 import {
   FaExchangeAlt,
   FaRedoAlt,
@@ -26,19 +26,19 @@ import {
   MdOutlineStayCurrentPortrait,
 } from 'react-icons/md'
 import {
-  ContentKind,
-  ControlCommand,
+  type ContentKind,
+  type ControlCommand,
   idColor,
   idxInBox,
   inviteLink,
-  LocalStreamData,
+  type LocalStreamData,
   roleCan,
-  StreamData,
-  StreamDelayStatus,
-  StreamwallRole,
-  StreamwallState,
-  StreamWindowConfig,
-  ViewState,
+  type StreamData,
+  type StreamDelayStatus,
+  type StreamwallRole,
+  type StreamwallState,
+  type StreamWindowConfig,
+  type ViewState,
 } from 'streamwall-shared'
 import { createGlobalStyle, styled } from 'styled-components'
 import { matchesState } from 'xstate'
@@ -998,7 +998,7 @@ function StreamDelayBox({
 function OrientationIndicator({
   orientation,
   ...props
-}: { orientation: 'V' | 'H' | null } & React.ComponentProps<IconType>) {
+}: { orientation: 'V' | 'H' | null } & ComponentProps<IconType>) {
   if (orientation === 'V') {
     return <MdOutlineStayCurrentPortrait {...props} />
   } else if (orientation === 'H') {
