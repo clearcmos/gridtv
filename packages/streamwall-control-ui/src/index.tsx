@@ -1,4 +1,12 @@
 import '@fontsource/noto-sans'
+// Design system fonts (bundled so they work under the strict app CSP).
+import '@fontsource/saira-stencil-one'
+import '@fontsource/ibm-plex-sans/400.css'
+import '@fontsource/ibm-plex-sans/500.css'
+import '@fontsource/ibm-plex-sans/600.css'
+import '@fontsource/jetbrains-mono/500.css'
+import '@fontsource/jetbrains-mono/700.css'
+import '@fontsource/oswald/600.css'
 import Color from 'color'
 import { orderBy, range, truncate } from 'lodash-es'
 import { DateTime } from 'luxon'
@@ -82,7 +90,82 @@ const hotkeyTriggers = [
   'p',
 ]
 
+/**
+ * Theme tokens. Light is the base; dark is applied either by the OS setting
+ * (prefers-color-scheme) when no explicit choice is made, or by an explicit
+ * `data-theme` attribute on <html> (set by the theme switcher).
+ *
+ *   <html>                       -> follow OS
+ *   <html data-theme="system">   -> follow OS
+ *   <html data-theme="light">    -> force light
+ *   <html data-theme="dark">     -> force dark
+ */
+const lightTokens = `
+  --bg:         #eef1f6;
+  --surface:    #ffffff;
+  --surface-2:  #f4f6fa;
+  --surface-3:  #e9edf3;
+  --border:     #dce1ea;
+  --border-2:   #c9d1dd;
+  --text:       #161b24;
+  --text-dim:   #5a6473;
+  --text-faint: #9aa3b1;
+  --accent:     #d6402a;
+  --accent-2:   #0a84ff;
+  --accent-soft:#fbe4df;
+  --live:       #d6402a;
+  --ok:         #17a35a;
+  --cell-bg:    #20242c;
+  --shadow:     0 6px 22px rgba(40,55,80,.12);
+`
+const darkTokens = `
+  --bg:         #0b0d11;
+  --surface:    #13161c;
+  --surface-2:  #191d25;
+  --surface-3:  #222731;
+  --border:     #2a303b;
+  --border-2:   #353c49;
+  --text:       #e8ecf2;
+  --text-dim:   #939cab;
+  --text-faint: #5b6470;
+  --accent:     #f24d2e;
+  --accent-2:   #4cc2ff;
+  --accent-soft:#2a1a16;
+  --live:       #ff445e;
+  --ok:         #3ddc84;
+  --cell-bg:    #0e1115;
+  --shadow:     0 8px 28px rgba(0,0,0,.45);
+`
+
 export const GlobalStyle = createGlobalStyle`
+  :root {
+    color-scheme: light dark;
+
+    --font-display: 'Saira Stencil One', 'Oswald', system-ui, sans-serif;
+    --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+    --r-sm: 6px;
+    --r-md: 9px;
+    --r-lg: 12px;
+    --sp: 4px;
+
+    /* base = light */
+    ${lightTokens}
+  }
+
+  /* Follow the OS when no explicit choice was made */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]),
+    :root[data-theme='system'] {
+      ${darkTokens}
+    }
+  }
+
+  /* Explicit overrides from the theme switcher */
+  :root[data-theme='light'] { ${lightTokens} }
+  :root[data-theme='dark']  { ${darkTokens} }
+
   html {
     height: 100%;
   }
@@ -90,8 +173,189 @@ export const GlobalStyle = createGlobalStyle`
   html, body {
     display: flex;
     flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+  }
+
+  * { box-sizing: border-box; }
+
+  /* ---- Sidebar (stream list / custom streams / access) ---- */
+  .stream-list h2 {
+    font-family: var(--font-display);
+    font-weight: normal;
+    font-size: 15px;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    margin: 24px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--accent);
+    display: inline-block;
+  }
+  .stream-list h3 {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--text-dim);
+    margin: 18px 0 8px;
+  }
+  .stream-list h3 .ct {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 7px;
+    margin-left: 6px;
+  }
+  .stream-list input,
+  .stream-list select {
+    font-family: var(--font-ui);
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 7px 10px;
+  }
+  .stream-list input::placeholder { color: var(--text-faint); }
+  .stream-list input:focus,
+  .stream-list select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .stream-list .filter-input {
+    width: 100%;
+    margin-bottom: 4px;
+  }
+  .stream-list button {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: var(--r-sm);
+    padding: 7px 12px;
+    cursor: pointer;
+  }
+  .stream-list button:hover { filter: brightness(1.08); }
+  .stream-list a { color: var(--accent-2); text-decoration: none; }
+  .stream-list a:hover { text-decoration: underline; }
+`
+
+type ThemeChoice = 'system' | 'light' | 'dark'
+const THEME_KEY = 'streamwall:theme'
+
+const StyledThemeToggle = styled.div`
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+
+  button {
+    display: grid;
+    place-items: center;
+    width: 27px;
+    height: 24px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    padding: 0;
+  }
+  button:hover {
+    color: var(--text-dim);
+  }
+  button.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  svg {
+    width: 15px;
+    height: 15px;
   }
 `
+
+/**
+ * Theme switcher. Writes the choice to <html data-theme> (read by GlobalStyle)
+ * and persists it in localStorage. 'system' clears the override so the OS
+ * setting (prefers-color-scheme) takes over.
+ */
+export function ThemeToggle() {
+  const [theme, setTheme] = useState<ThemeChoice>(() => {
+    try {
+      return (localStorage.getItem(THEME_KEY) as ThemeChoice) ?? 'system'
+    } catch {
+      return 'system'
+    }
+  })
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem(THEME_KEY, theme)
+    } catch {
+      // ignore (e.g. storage disabled)
+    }
+  }, [theme])
+
+  const opts = [
+    {
+      key: 'system' as const,
+      label: 'System',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <path d="M8 21h8M12 17v4" />
+        </svg>
+      ),
+    },
+    {
+      key: 'light' as const,
+      label: 'Hell',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </svg>
+      ),
+    },
+    {
+      key: 'dark' as const,
+      label: 'Dunkel',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+        </svg>
+      ),
+    },
+  ]
+
+  return (
+    <StyledThemeToggle role="group" aria-label="Farbschema">
+      {opts.map(({ key, label, icon }) => (
+        <button
+          key={key}
+          type="button"
+          class={theme === key ? 'active' : undefined}
+          title={label}
+          aria-label={label}
+          aria-pressed={theme === key}
+          onClick={() => setTheme(key)}
+        >
+          {icon}
+        </button>
+      ))}
+    </StyledThemeToggle>
+  )
+}
 
 const normalStreamKinds = new Set(['video', 'audio', 'web'])
 function filterStreams(
@@ -653,18 +917,35 @@ export function ControlUI({
   }
 
   return (
-    <Stack flex="1" direction="row" gap={16}>
-      <Stack className="grid-container">
+    <Stack
+      flex="1"
+      direction="row"
+      gap={16}
+      style={{ height: '100vh', minHeight: 0, padding: 16, overflow: 'hidden' }}
+    >
+      <Stack
+        className="grid-container"
+        flex="1"
+        style={{ minWidth: 0, minHeight: 0 }}
+      >
         <StyledHeader>
-          {role !== 'local' && (
-            <>
-              <h1>Streamwall ({location.host})</h1>
-              <div>
-                connection status: {isConnected ? 'connected' : 'connecting...'}
-              </div>
-              <div>role: {role}</div>
-            </>
+          <div className="wm">
+            STREAM<span>·</span>WALL
+          </div>
+          <div className="crumbs">
+            //&nbsp; <b>Multiview</b> &nbsp;·&nbsp; {cols}×{rows}
+          </div>
+          <div className="spacer" />
+          {liveStreams.length > 0 && (
+            <div className="livecount">● {liveStreams.length} On Air</div>
           )}
+          {role !== 'local' && (
+            <div className="status">
+              <span className={`dot ${isConnected ? 'on' : 'off'}`} />
+              {isConnected ? 'verbunden' : 'verbinde…'} · {role}
+            </div>
+          )}
+          <ThemeToggle />
         </StyledHeader>
         {delayState && (
           <StreamDelayBox
@@ -674,7 +955,16 @@ export function ControlUI({
             setStreamRunning={setStreamRunning}
           />
         )}
-        <StyledDataContainer isConnected={isConnected}>
+        <StyledDataContainer
+          isConnected={isConnected}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+          }}
+        >
           {cols != null && rows != null && (
             <StyledGridContainer
               className="grid"
@@ -805,33 +1095,51 @@ export function ControlUI({
               )}
             </StyledGridContainer>
           )}
+        </StyledDataContainer>
+        <StyledStatusBar>
           {(roleCan(role, 'dev-tools') || roleCan(role, 'browse')) && (
-            <label>
+            <label className="dbg">
               <input
                 type="checkbox"
                 checked={showDebug}
                 onChange={handleChangeShowDebug}
               />
-              Show stream debug tools
+              Debug-Tools
             </label>
           )}
-          <Facts />
-        </StyledDataContainer>
+          <span className="spacer" />
+          <span className="meta">
+            {streams.length} Quellen · {liveStreams.length} live
+          </span>
+        </StyledStatusBar>
       </Stack>
-      <Stack className="stream-list" flex="1" scroll={true} minHeight={200}>
+      <Stack
+        className="stream-list"
+        scroll={true}
+        minHeight={200}
+        style={{ flex: '0 0 340px' }}
+      >
         <StyledDataContainer isConnected={isConnected}>
           {isConnected ? (
             <div>
               <input
+                className="filter-input"
                 onChange={handleStreamFilterChange}
                 value={streamFilter}
-                placeholder="filter"
+                placeholder="Quellen filtern…"
               />
-              <h3>Viewing</h3>
+              <h3>
+                Viewing <span className="ct">{wallStreams.length}</span>
+              </h3>
               <StreamList rows={wallStreams} />
-              <h3>Live</h3>
+              <h3>
+                Live <span className="ct">{liveStreams.length}</span>
+              </h3>
               <StreamList rows={liveStreams} />
-              <h3>Offline / Unknown</h3>
+              <h3>
+                Offline / Unknown{' '}
+                <span className="ct">{otherStreams.length}</span>
+              </h3>
               <StreamList rows={otherStreams} />
             </div>
           ) : (
@@ -1396,28 +1704,100 @@ function CreateCustomStreamInput({
 
 const StyledHeader = styled.header`
   display: flex;
-  flex-direction: row;
   align-items: center;
+  gap: 18px;
+  flex: 0 0 auto;
+  position: relative;
+  padding: 4px 2px 14px;
+  margin-bottom: 14px;
 
-  h1 {
-    margin-top: 0;
-    margin-bottom: 0;
+  /* Stencil-editorial anchor: a red rule that runs out into the border line. */
+  &::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: linear-gradient(
+      90deg,
+      var(--accent) 0 132px,
+      var(--border) 132px
+    );
   }
 
-  * {
-    margin-right: 2rem;
+  .wm {
+    font-family: var(--font-display);
+    font-size: 27px;
+    line-height: 1;
+    letter-spacing: 0.03em;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .wm span {
+    color: var(--accent);
+  }
+
+  .crumbs {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+  }
+  .crumbs b {
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .livecount {
+    font-family: 'Oswald', var(--font-ui);
+    text-transform: uppercase;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 5px 11px;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .status .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .status .dot.on {
+    background: var(--ok);
+  }
+  .status .dot.off {
+    background: var(--text-faint);
   }
 `
 
 const StyledStreamDelayBox = styled.div`
   display: inline-flex;
+  align-items: center;
   margin: 5px 0;
-  padding: 10px;
-  background: #fdd;
-
-  & > * {
-    margin-right: 1em;
-  }
+  padding: 10px 12px;
+  gap: 1em;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--text);
 `
 
 const StyledDataContainer = styled.div`
@@ -1427,21 +1807,30 @@ const StyledDataContainer = styled.div`
 const StyledButton = styled.button`
   display: flex;
   align-items: center;
-  border: 2px solid gray;
-  border-color: gray;
-  background: #ccc;
-  border-radius: 5px;
+  justify-content: center;
+  border: 1px solid var(--border-2);
+  background: var(--surface-3);
+  color: var(--text-dim);
+  border-radius: var(--r-sm);
+  padding: 4px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text);
+    border-color: var(--text-faint);
+  }
 
   ${({ isActive, activeColor = 'red' }) =>
     isActive &&
     `
       border-color: ${Color(activeColor).hsl().string()};
-      background: ${Color(activeColor).desaturate(0.5).lighten(0.5).hsl().string()};
+      background: ${Color(activeColor).hsl().string()};
+      color: #fff;
     `};
 
   &:focus {
     outline: none;
-    box-shadow: 0 0 10px orange inset;
+    box-shadow: 0 0 0 2px var(--accent-soft);
   }
 
   svg {
@@ -1583,14 +1972,19 @@ const StyledGridControlsContainer = styled.div`
   }
 `
 
-const StyledGridContainer = styled.div.attrs(() => ({
-  scale: 0.75,
-}))`
+const StyledGridContainer = styled.div`
   position: relative;
-  width: ${({ windowWidth, scale }) => windowWidth * scale}px;
-  height: ${({ windowHeight, scale }) => windowHeight * scale}px;
-  border: 2px solid black;
-  background: black;
+  /* Responsive: keep the wall's aspect ratio but fit the available space
+     instead of a hard-coded pixel size, so the layout never overflows. */
+  aspect-ratio: ${({ windowWidth, windowHeight }) =>
+    `${windowWidth} / ${windowHeight}`};
+  width: 100%;
+  max-height: 100%;
+  margin: 0 auto;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  background: var(--cell-bg);
+  overflow: hidden;
 
   &:hover ${StyledGridInputs} {
     opacity: 0.35;
@@ -1599,21 +1993,42 @@ const StyledGridContainer = styled.div.attrs(() => ({
 
 const StyledId = styled.div`
   flex-shrink: 0;
-  margin-right: 5px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.02em;
   background: ${({ $color }) =>
-    Color($color).lightness(50).hsl().string() || '#333'};
-  color: white;
-  padding: 3px;
-  border-radius: 5px;
-  width: 3em;
+    Color($color).lightness(52).hsl().string() || '#333'};
+  color: #0a0d12;
+  padding: 4px 0;
+  border-radius: var(--r-sm);
+  width: 2.6em;
   text-align: center;
-  cursor: ${({ $disabled }) => ($disabled ? 'normal' : 'pointer')};
+  cursor: ${({ $disabled }) => ($disabled ? 'normal' : 'grab')};
 `
 
 const StyledStreamLine = styled.div`
   display: flex;
   align-items: center;
-  margin: 0.5em 0;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  font-size: 13px;
+  cursor: default;
+
+  &:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+  }
+
+  & > div {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
 
   svg {
     height: 100%;
@@ -1670,9 +2085,14 @@ function CreateInviteInput({
 }
 
 const StyledNewInviteBox = styled.div`
-  display: inline-block;
-  padding: 10px;
-  background: #dfd;
+  display: block;
+  padding: 10px 12px;
+  margin: 8px 0;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+  color: var(--text);
+  font-size: 13px;
 `
 
 function AuthTokenLine({
@@ -1697,50 +2117,38 @@ function AuthTokenLine({
   )
 }
 
-function Facts() {
-  return (
-    <StyledFacts>
-      <BLM>Black Lives Matter.</BLM>
-      <TRM>
-        Trans rights are <em>human rights.</em>
-      </TRM>
-      <TIN>Technology is not neutral.</TIN>
-    </StyledFacts>
-  )
-}
-
-const StyledFacts = styled.div`
+const StyledStatusBar = styled.div`
   display: flex;
-  margin: 4px 0;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
 
-  & > * {
-    line-height: 26px;
-    margin-right: 0.5em;
-    padding: 0 6px;
-    flex-shrink: 0;
+  .spacer {
+    flex: 1;
   }
-`
 
-const BLM = styled.div`
-  background: black;
-  color: white;
-`
+  .meta {
+    color: var(--text-faint);
+  }
 
-const TRM = styled.div`
-  background: linear-gradient(
-    to bottom,
-    #55cdfc 12%,
-    #f7a8b8 12%,
-    #f7a8b8 88%,
-    #55cdfc 88%
-  );
-  color: white;
-  text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
-`
-
-const TIN = styled.div`
-  background: gray;
-  font-family: monospace;
+  label.dbg {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  label.dbg input {
+    accent-color: var(--accent);
+  }
 `
 
 // TODO: reuse for server

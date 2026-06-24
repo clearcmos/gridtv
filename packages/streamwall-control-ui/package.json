@@ -5,7 +5,11 @@
   "type": "module",
   "main": "./src/index.tsx",
   "dependencies": {
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/noto-sans": "^5.2.10",
+    "@fontsource/oswald": "^5.2.8",
+    "@fontsource/saira-stencil-one": "^5.2.8",
     "color": "^5.0.3",
     "jsondiffpatch": "^0.7.6",
     "lodash-es": "^4.18.1",
