@@ -118,3 +118,50 @@ export function idxInBox(
   const yInBox = y >= lowY && y <= highY
   return xInBox && yInBox
 }
+
+/** Inclusive bounds for grid dimensions (columns / rows). */
+export const GRID_MIN = 1
+export const GRID_MAX = 8
+
+/** Rounds and clamps a grid dimension into [GRID_MIN, GRID_MAX]. */
+export function clampGridDimension(n: number): number {
+  if (!Number.isFinite(n)) {
+    return GRID_MIN
+  }
+  return Math.max(GRID_MIN, Math.min(GRID_MAX, Math.round(n)))
+}
+
+/**
+ * Remaps grid cell assignments when the grid dimensions change. Each non-empty
+ * assignment is preserved at the same (x, y) position if that position still
+ * exists in the new grid; assignments that fall outside the new grid are
+ * dropped. The returned map covers every cell of the new grid (empty cells are
+ * `undefined`).
+ *
+ * @param oldCols Column count of the current grid (needed to read (x, y)).
+ * @param newCols Column count of the target grid.
+ * @param newRows Row count of the target grid.
+ * @param oldAssignments Map of old cell index -> streamId (undefined/'' = empty).
+ */
+export function remapGridAssignments(
+  oldCols: number,
+  newCols: number,
+  newRows: number,
+  oldAssignments: Map<number, string | undefined>,
+): Map<number, string | undefined> {
+  const result = new Map<number, string | undefined>()
+  for (let idx = 0; idx < newCols * newRows; idx++) {
+    result.set(idx, undefined)
+  }
+  for (const [oldIdx, streamId] of oldAssignments) {
+    if (streamId === undefined || streamId === '') {
+      continue
+    }
+    const x = oldIdx % oldCols
+    const y = Math.floor(oldIdx / oldCols)
+    if (x < newCols && y < newRows) {
+      result.set(newCols * y + x, streamId)
+    }
+  }
+  return result
+}
