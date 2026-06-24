@@ -1,1 +1,86 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+build/Release/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime / local data
+*.pid
+*.seed
+*.pid.lock
+storage.json
+*.local
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Caches
+.cache/
+.eslintcache
+.npm/
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.sublime-*
+*.swp
+*.swo
+*.swn
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.DocumentRevisions-V100
+.fseventsd
+.VolumeIcon.icns
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# AI assistant / tooling files
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.windsurfrules
