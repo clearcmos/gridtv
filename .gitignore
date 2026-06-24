@@ -85,5 +85,8 @@ AGENTS.md
 .aider*
 .windsurfrules
 
+# Superpowers specs / plans (local AI workflow artifacts)
+docs/superpowers/
+
 # Local design mockups / render artifacts
 design/
