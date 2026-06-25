@@ -133,6 +133,7 @@ export type ControlCommand =
   | { type: 'set-stream-running'; isStreamRunning: boolean }
   | { type: 'create-invite'; role: string; name: string }
   | { type: 'delete-token'; tokenId: string }
+  | { type: 'set-grid-size'; cols: number; rows: number }
 
 export type ControlUpdate = {
   type: 'state'
