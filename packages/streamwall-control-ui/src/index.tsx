@@ -672,6 +672,48 @@ export function ControlUI({
     return () => window.removeEventListener('mouseup', endMove)
   }, [moveStart, hoveringIdx, swapBoxes])
 
+  const [resize, setResize] = useState<
+    { anchorIdx: number; streamId: string } | undefined
+  >()
+
+  const handleResizeStart = useCallback(
+    (anchorIdx: number, ev: MouseEvent) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+      const streamId = sharedState?.views?.[anchorIdx]?.streamId ?? undefined
+      if (streamId == null || streamId === '') {
+        return
+      }
+      setResize({ anchorIdx, streamId })
+    },
+    [sharedState],
+  )
+
+  useLayoutEffect(() => {
+    function endResize() {
+      if (
+        resize == null ||
+        cols == null ||
+        rows == null ||
+        hoveringIdx == null
+      ) {
+        setResize(undefined)
+        return
+      }
+      stateDoc.transact(() => {
+        const viewsMap = stateDoc.getMap<Y.Map<string | undefined>>('views')
+        for (let idx = 0; idx < cols * rows; idx++) {
+          if (idxInBox(cols, resize.anchorIdx, hoveringIdx, idx)) {
+            viewsMap.get(String(idx))?.set('streamId', resize.streamId)
+          }
+        }
+      })
+      setResize(undefined)
+    }
+    window.addEventListener('mouseup', endResize)
+    return () => window.removeEventListener('mouseup', endResize)
+  }, [resize, cols, rows, hoveringIdx, stateDoc])
+
   const [focusedInputIdx, setFocusedInputIdx] = useState<number | undefined>()
   const handleBlurInput = useCallback(() => setFocusedInputIdx(undefined), [])
 
@@ -1031,6 +1073,12 @@ export function ControlUI({
                       (stateIdxMap.get(moveTargetIdx)?.spaces ?? [
                         moveTargetIdx,
                       ]).includes(idx)
+                    const isResizeHighlight =
+                      resize != null &&
+                      cols != null &&
+                      hoveringIdx != null &&
+                      idxInBox(cols, resize.anchorIdx, hoveringIdx, idx)
+                    const isHighlighted = isMoveHighlight || isResizeHighlight
                     return (
                       <GridInput
                         style={{
@@ -1042,7 +1090,7 @@ export function ControlUI({
                         idx={idx}
                         spaceValue={streamId ?? ''}
                         onChangeSpace={handleSetView}
-                        isHighlighted={isMoveHighlight}
+                        isHighlighted={isHighlighted}
                         role={role}
                         onMouseDown={handleGridMouseDown}
                         onFocus={setFocusedInputIdx}
@@ -1052,6 +1100,57 @@ export function ControlUI({
                   }),
                 )}
               </StyledGridInputs>
+              {cols != null && rows != null && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {views.map(({ state }) => {
+                    const { pos } = state.context
+                    if (pos == null) {
+                      return null
+                    }
+                    const anchorIdx = Math.min(...pos.spaces)
+                    return (
+                      <div
+                        key={`rh-${anchorIdx}`}
+                        style={{
+                          position: 'absolute',
+                          left: `${(100 * pos.x) / windowWidth}%`,
+                          top: `${(100 * pos.y) / windowHeight}%`,
+                          width: `${(100 * pos.width) / windowWidth}%`,
+                          height: `${(100 * pos.height) / windowHeight}%`,
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        <StyledResizeHandles>
+                          <div
+                            className="handle e"
+                            onMouseDown={(ev) =>
+                              handleResizeStart(anchorIdx, ev)
+                            }
+                          />
+                          <div
+                            className="handle s"
+                            onMouseDown={(ev) =>
+                              handleResizeStart(anchorIdx, ev)
+                            }
+                          />
+                          <div
+                            className="handle se"
+                            onMouseDown={(ev) =>
+                              handleResizeStart(anchorIdx, ev)
+                            }
+                          />
+                        </StyledResizeHandles>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               <StyledGridPreview>
                 {views.map(({ state, isListening }) => {
                   const { pos } = state.context
@@ -1468,6 +1567,46 @@ function LazyChangeInput({
     />
   )
 }
+
+const StyledResizeHandles = styled.div`
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+
+  .handle {
+    position: absolute;
+    pointer-events: auto;
+    background: var(--accent, #e23);
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  &:hover .handle {
+    opacity: 0.6;
+  }
+  .handle.e {
+    top: 20%;
+    bottom: 20%;
+    right: -3px;
+    width: 6px;
+    cursor: ew-resize;
+  }
+  .handle.s {
+    left: 20%;
+    right: 20%;
+    bottom: -3px;
+    height: 6px;
+    cursor: ns-resize;
+  }
+  .handle.se {
+    right: -4px;
+    bottom: -4px;
+    width: 10px;
+    height: 10px;
+    cursor: nwse-resize;
+    opacity: 0.8;
+    border-radius: 2px;
+  }
+`
 
 const StyledGridSizeControls = styled.div`
   display: flex;
