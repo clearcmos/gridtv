@@ -34,8 +34,11 @@ import {
   MdOutlineStayCurrentPortrait,
 } from 'react-icons/md'
 import {
+  clampGridDimension,
   type ContentKind,
   type ControlCommand,
+  GRID_MAX,
+  GRID_MIN,
   idColor,
   idxInBox,
   inviteLink,
@@ -668,6 +671,17 @@ export function ControlUI({
     [send],
   )
 
+  const handleSetGridSize = useCallback(
+    (nextCols: number, nextRows: number) => {
+      send({
+        type: 'set-grid-size',
+        cols: clampGridDimension(nextCols),
+        rows: clampGridDimension(nextRows),
+      })
+    },
+    [send],
+  )
+
   const handleSetBackgroundListening = useCallback(
     (viewIdx: number, listening: boolean) => {
       send({
@@ -935,6 +949,14 @@ export function ControlUI({
           <div className="crumbs">
             //&nbsp; <b>Multiview</b> &nbsp;·&nbsp; {cols}×{rows}
           </div>
+          {cols != null && rows != null && (
+            <GridSizeControls
+              cols={cols}
+              rows={rows}
+              role={role}
+              onSetGridSize={handleSetGridSize}
+            />
+          )}
           <div className="spacer" />
           {liveStreams.length > 0 && (
             <div className="livecount">● {liveStreams.length} On Air</div>
@@ -1416,6 +1438,101 @@ function LazyChangeInput({
       onChange={handleChange}
       {...props}
     />
+  )
+}
+
+const StyledGridSizeControls = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+
+  button.preset {
+    padding: 2px 8px;
+    border: 1px solid var(--border, #444);
+    background: transparent;
+    color: inherit;
+    border-radius: 4px;
+    cursor: pointer;
+    font: inherit;
+  }
+  button.preset.active {
+    border-color: var(--accent, #e23);
+    color: var(--accent, #e23);
+  }
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+  }
+  input {
+    width: 44px;
+    background: transparent;
+    color: inherit;
+    border: 1px solid var(--border, #444);
+    border-radius: 4px;
+    padding: 2px 4px;
+  }
+`
+
+const GRID_PRESETS: Array<[number, number]> = [
+  [2, 2],
+  [3, 3],
+  [4, 4],
+  [2, 3],
+  [3, 2],
+  [4, 3],
+]
+
+function GridSizeControls({
+  cols,
+  rows,
+  role,
+  onSetGridSize,
+}: {
+  cols: number
+  rows: number
+  role: StreamwallRole | null
+  onSetGridSize: (cols: number, rows: number) => void
+}) {
+  const disabled = !roleCan(role, 'mutate-state-doc')
+  return (
+    <StyledGridSizeControls>
+      {GRID_PRESETS.map(([c, r]) => (
+        <button
+          key={`${c}x${r}`}
+          type="button"
+          className={c === cols && r === rows ? 'preset active' : 'preset'}
+          disabled={disabled}
+          onClick={() => onSetGridSize(c, r)}
+        >
+          {c}×{r}
+        </button>
+      ))}
+      <label>
+        Spalten
+        <input
+          type="number"
+          min={GRID_MIN}
+          max={GRID_MAX}
+          value={cols}
+          disabled={disabled}
+          onChange={(ev) => onSetGridSize(ev.currentTarget.valueAsNumber, rows)}
+        />
+      </label>
+      <label>
+        Zeilen
+        <input
+          type="number"
+          min={GRID_MIN}
+          max={GRID_MAX}
+          value={rows}
+          disabled={disabled}
+          onChange={(ev) => onSetGridSize(cols, ev.currentTarget.valueAsNumber)}
+        />
+      </label>
+    </StyledGridSizeControls>
   )
 }
 
