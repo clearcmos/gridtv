@@ -59,6 +59,8 @@ import {
 import { createGlobalStyle, styled } from 'styled-components'
 import { matchesState } from 'xstate'
 import * as Y from 'yjs'
+import { createErrorSurfacingSend } from './commandError.ts'
+import { CommandErrorBanner } from './CommandErrorBanner.tsx'
 import { DataSourceHealthBanner } from './DataSourceHealthBanner.tsx'
 import {
   computeHoveringIdx,
@@ -620,7 +622,7 @@ export function ControlUI({
 }) {
   const {
     isConnected,
-    send,
+    send: connectionSend,
     sharedState,
     stateDoc,
     undoManager,
@@ -641,6 +643,15 @@ export function ControlUI({
     width: windowWidth,
     height: windowHeight,
   } = config ?? { cols: null, rows: null, width: null, height: null }
+
+  // Surfaces `{ error }` command responses that would otherwise be dropped
+  // silently by the many call sites below that don't pass their own
+  // response callback (issue #35).
+  const [commandError, setCommandError] = useState<string | null>(null)
+  const send = useMemo(
+    () => createErrorSurfacingSend(connectionSend, setCommandError),
+    [connectionSend],
+  )
 
   const [showDebug, setShowDebug] = useState(false)
   const handleChangeShowDebug = useCallback<
@@ -1289,6 +1300,10 @@ export function ControlUI({
           <ThemeToggle />
         </StyledHeader>
         <DataSourceHealthBanner dataSourceHealth={dataSourceHealth} />
+        <CommandErrorBanner
+          error={commandError}
+          onDismiss={() => setCommandError(null)}
+        />
         {delayState && (
           <StreamDelayBox
             role={role}
