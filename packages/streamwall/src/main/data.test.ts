@@ -477,6 +477,33 @@ describe('StreamIDGenerator', () => {
     expect(second[0]._id).toBe('exa')
     expect(second[1]._id).toBe('exa1')
   })
+
+  test('honors a persisted custom-source id across fresh generators and reordering', () => {
+    const firstOrder = [
+      stream({
+        link: 'https://www.twitch.tv/lacy',
+        _id: 'twitch-lacy',
+        _dataSource: 'custom',
+      }),
+      stream({
+        link: 'https://www.twitch.tv/sodapoppin',
+        _id: 'twitch-sodapoppin',
+        _dataSource: 'custom',
+      }),
+    ]
+    new StreamIDGenerator().process(firstOrder)
+    expect(firstOrder.map((entry) => entry._id)).toEqual([
+      'twitch-lacy',
+      'twitch-sodapoppin',
+    ])
+
+    const reversed = [...firstOrder].reverse().map((entry) => ({ ...entry }))
+    new StreamIDGenerator().process(reversed)
+    expect(reversed.map((entry) => entry._id)).toEqual([
+      'twitch-sodapoppin',
+      'twitch-lacy',
+    ])
+  })
 })
 
 describe('LocalStreamData', () => {

@@ -26,6 +26,62 @@ export interface ViewContent {
 }
 export type ViewContentMap = Map<string, ViewContent>
 
+/** The live-only wall deliberately exposes a compact 1-9 tile picker. */
+export const LIVE_TILE_MIN = 1
+export const LIVE_TILE_MAX = 9
+
+/** Rounds and clamps a requested live-wall tile count into the supported range. */
+export function clampLiveTileCount(count: number): number {
+  if (!Number.isFinite(count)) {
+    return LIVE_TILE_MIN
+  }
+  return Math.max(LIVE_TILE_MIN, Math.min(LIVE_TILE_MAX, Math.round(count)))
+}
+
+/**
+ * Lays out an exact number of tiles edge-to-edge.
+ *
+ * A conventional rectangular CSS grid leaves holes for non-square counts such
+ * as 3, 5, 7, and 8. The wall instead balances the number of tiles per row and
+ * lets every row consume the full width. Integer boundaries are calculated
+ * from cumulative fractions, so rounding can never leave a one-pixel seam at
+ * the right or bottom edge.
+ */
+export function computeLiveTileLayout(
+  requestedCount: number,
+  width: number,
+  height: number,
+): ViewPos[] {
+  const count = clampLiveTileCount(requestedCount)
+  const maxColumns = Math.ceil(Math.sqrt(count))
+  const rowCount = Math.ceil(count / maxColumns)
+  const minColumnsPerRow = Math.floor(count / rowCount)
+  const widerRows = count % rowCount
+  const positions: ViewPos[] = []
+  let idx = 0
+
+  for (let row = 0; row < rowCount; row++) {
+    const columns = minColumnsPerRow + (row < widerRows ? 1 : 0)
+    const top = Math.floor((height * row) / rowCount)
+    const bottom = Math.floor((height * (row + 1)) / rowCount)
+
+    for (let column = 0; column < columns; column++) {
+      const left = Math.floor((width * column) / columns)
+      const right = Math.floor((width * (column + 1)) / columns)
+      positions.push({
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+        spaces: [idx],
+      })
+      idx++
+    }
+  }
+
+  return positions
+}
+
 export function boxesFromViewContentMap(
   cols: number,
   rows: number,

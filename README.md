@@ -8,7 +8,9 @@
 
 Streamwall makes it easy to compose multiple livestreams into a mosaic, with source attributions and audio control.
 
-It's a cross-platform desktop app built with Electron and TypeScript. Streams are arranged in a grid you can rearrange on the fly, audio is switchable per tile, and the whole wall runs locally with an optional control server for remote operation.
+This branch is a self-contained Twitch CCTV viewer built with Electron and
+TypeScript. The video wall is the complete interface: there is no separate
+local staging window.
 
 ## Download
 
@@ -38,9 +40,9 @@ Under the hood, think of Streamwall as a specialized web browser for mosaicing v
 
 ## Features
 
-- **Resizable grid** — arrange streams in a grid up to 16×16 (256 logical cells); resize it at runtime from the control UI (dense presets or exact counts), no restart required.
-- **Drag-to-place layout** — drag a tile onto another to swap their positions, or drop a stream from the list straight onto a grid cell.
-- **Per-tile audio** — listen to any single tile's audio at a time, switchable with a click or hotkey, with a per-tile volume slider.
+- **Exact 1–9 tile wall** — press **F1** and click a number; every count fills the window edge-to-edge without an unused grid cell.
+- **Direct stream replacement** — click the edit/plus icon in any tile and type a Twitch username; a full URL is optional.
+- **Per-tile audio mixing** — every tile can be muted or unmuted independently, so multiple streams can play audio simultaneously, each with its own volume slider.
 - **Blur/censor** — blur individual tiles, or trigger a wall-wide [Streamdelay](https://github.com/chromakode/streamdelay) censor mode.
 - **Dark mode** — light, dark, or system-matched theme in the control UI.
 - **Remote control with roles** — an optional web-based control server lets operators run the wall from a browser, with **admin**, **operator**, and **monitor** roles gated by invite links.
@@ -49,7 +51,8 @@ Under the hood, think of Streamwall as a specialized web browser for mosaicing v
 - **Playlists** — optionally cycle a grid cell through a fixed list of stream URLs on an interval.
 - **Twitch chat bot** — an optional bot posts templated announcements and runs viewer polls in a Twitch channel's chat.
 
-![The Streamwall control UI: resize the grid, arrange streams by drag-and-drop, add custom sources, and manage role-based operator invites](docs/images/control-ui.png)
+The original control UI remains in the source tree for upstream compatibility,
+but this desktop build does not launch it.
 
 ## Configuration
 
@@ -83,12 +86,9 @@ Configuration precedence is:
 
 See `example.config.toml` for an example.
 
-On first launch, if no user data `config.toml` exists yet, the control
-window shows a dismissible hint with the exact path above, offering a
-**Create Example Config** action that writes `example.config.toml` there as
-a working starting point (restart Streamwall afterward to load it). The
-same action is available as **File → Create Example Config** in the app
-menu, alongside **File → Open Config Folder**, until a config file exists.
+The wall works without a configuration file. Create `config.toml` at the path
+above only when you want to override media quality, window placement, retry
+behavior, or another advanced option.
 
 ### Logging
 
@@ -113,20 +113,22 @@ and discovery UI in every tile. The density-oriented default is 360p; set
 `media.twitch-quality` to `160p`, `360p`, `480p`, `720p`, or `auto`. Set
 `media.twitch-player = false` to retain full Twitch channel pages.
 
-For a dense CCTV wall, start with a 4×4 or 5×5 grid and 160p players:
+For a dense nine-tile CCTV wall, 160p players reduce bandwidth and decoder
+pressure:
 
 ```toml
 [grid]
-cols = 5
-rows = 5
+cols = 3
+rows = 3
 
 [media]
 twitch-quality = "160p"
 ```
 
-The 16×16 grid cap is a layout/protocol limit, not a promise that every machine
-can decode 256 live videos. Available CPU/GPU video-decode capacity, memory,
-bandwidth, and Twitch connection behavior determine the practical ceiling.
+On first launch, `grid.cols × grid.rows` supplies the initial tile count and is
+clamped to the live wall's 1–9 range. After that, the F1 selection is persisted.
+Available CPU/GPU video-decode capacity, memory, bandwidth, and Twitch
+connection behavior still determine how many simultaneous videos work well.
 
 Poster snapshots are bounded WebP images taken every 10 seconds, scaled no
 larger than the visible tile or 640 pixels wide. Configure
@@ -137,23 +139,29 @@ HLS inputs cap automatic quality selection to the player size.
 
 ### Wall hover controls
 
-Hover a tile in the actual **Streamwall** video window to pause or play that
-stream, change its volume, or cycle its speaker through three modes:
+Hover a tile to pause/play it, adjust its volume, or toggle it between
+**Muted** and **Unmuted**. Every unmuted tile is mixed simultaneously.
 
-- **Stage** (blue) follows the staging/control window's existing audio choice.
-- **Muted** (red) locally mutes the tile regardless of the staging choice.
-- **Unmuted** (green) locally enables the tile and mixes it with every other
-  wall tile in Unmuted mode.
+Press **F1** to choose an exact tile count from 1 through 9. Shrinking keeps the
+first active streams in visual order and closes every player that no longer
+fits. The edit/plus icon in each tile opens the Twitch channel picker. Bare
+usernames such as `lacy`, `@lacy`, and full channel URLs are all accepted.
 
-Wall audio overrides do not rewrite the staging state, so returning a tile to
-Stage immediately restores the staging operator's latest choice.
+Channel suggestions are requested only after 350 ms without another keystroke,
+require at least two characters, return at most eight names, and are cached for
+one minute. Search failure never prevents entering an exact username.
+
+Tile count, assignments, mute state, volume, and paused state are written while
+the app runs. Pending writes are flushed before quit. Custom Twitch sources use
+stable URL-derived IDs, so removing or reordering sources cannot detach the
+saved layout on the next launch.
 
 ### Telemetry
 
 Streamwall reports uncaught errors to a Sentry project run by the maintainers
 (`telemetry.sentry`, default `true`). This covers the main process and every
-renderer the app fully authors (the control window, and the background and
-overlay layers); it deliberately does **not** cover the per-stream views or
+renderer the app fully authors (the background and overlay layers); it
+deliberately does **not** cover the per-stream views or
 the "browse" window, since those load arbitrary third-party URLs and
 attaching error reporting there would leak that content's context to Sentry.
 To opt out, set `sentry = false` under `[telemetry]` in your config file (see

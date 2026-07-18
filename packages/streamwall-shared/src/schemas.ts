@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { GRID_MAX, GRID_MIN } from './geometry.ts'
+import { GRID_MAX, GRID_MIN, LIVE_TILE_MAX, LIVE_TILE_MIN } from './geometry.ts'
 import { invitableRoles, validRoles } from './roles.ts'
 
 /**
@@ -53,13 +53,15 @@ const viewActorIdSchema = z
 const gridDimensionSchema = z.number().int().min(GRID_MIN).max(GRID_MAX)
 const volumeSchema = z.number().min(0).max(1)
 
-/**
- * How the wall-side speaker control relates to the staging/control window.
- * `stage` follows the existing staging audio state, while the other values are
- * local wall overrides that deliberately do not rewrite that staging state.
- */
-export const wallAudioModeSchema = z.enum(['stage', 'muted', 'unmuted'])
+/** The self-contained wall has a direct two-state speaker control. */
+export const wallAudioModeSchema = z.enum(['muted', 'unmuted'])
 export type WallAudioMode = z.infer<typeof wallAudioModeSchema>
+
+const liveTileCountSchema = z
+  .number()
+  .int()
+  .min(LIVE_TILE_MIN)
+  .max(LIVE_TILE_MAX)
 
 /**
  * Commands accepted from the trusted wall overlay. They use the actor's stable
@@ -70,17 +72,33 @@ export const wallControlCommandSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('set-wall-playback'),
     viewId: viewActorIdSchema,
+    viewIdx: viewIdxSchema,
     paused: z.boolean(),
   }),
   z.object({
     type: z.literal('set-wall-volume'),
     viewId: viewActorIdSchema,
+    viewIdx: viewIdxSchema,
     volume: volumeSchema,
   }),
   z.object({
     type: z.literal('set-wall-audio-mode'),
     viewId: viewActorIdSchema,
+    viewIdx: viewIdxSchema,
     mode: wallAudioModeSchema,
+  }),
+  z.object({
+    type: z.literal('set-wall-tile-count'),
+    count: liveTileCountSchema,
+  }),
+  z.object({
+    type: z.literal('set-wall-stream'),
+    viewIdx: z
+      .number()
+      .int()
+      .min(0)
+      .max(LIVE_TILE_MAX - 1),
+    username: z.string().trim().max(100),
   }),
 ])
 export type WallControlCommand = z.infer<typeof wallControlCommandSchema>
@@ -303,6 +321,7 @@ const authTokenInfoSchema = z.object({
 const streamWindowConfigSchema = z.object({
   cols: gridDimensionSchema,
   rows: gridDimensionSchema,
+  tileCount: liveTileCountSchema.optional(),
   width: z.number(),
   height: z.number(),
   x: z.number().optional(),

@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/electron/main'
-import { BrowserWindow, Event as ElectronEvent, app } from 'electron'
+import { BrowserWindow, Event as ElectronEvent, app, ipcMain } from 'electron'
 import started from 'electron-squirrel-startup'
 import fs from 'fs'
 import { throttle } from 'lodash-es'
@@ -12,9 +12,12 @@ import {
   ControlCommand,
   DataSourceType,
   StreamwallState,
+  WallControlCommand,
   fullscreenViewContentMap,
   isSocketOpen,
   parseControlEndpoint,
+  twitchChannelUrl,
+  twitchLoginFromInput,
 } from 'streamwall-shared'
 import { updateElectronApp } from 'update-electron-app'
 import WebSocket from 'ws'
@@ -32,7 +35,7 @@ import {
 } from '../sentryConfig'
 import { TWITCH_QUALITIES, type TwitchQuality } from '../twitchPlayer'
 import { createSessionHostResolver, ensureValidURL } from '../util'
-import { dispatchCommand, dispatchLocalCommand } from './commandDispatch'
+import { dispatchCommand } from './commandDispatch'
 import {
   findUnknownConfigKeys,
   parseConfigToml,
@@ -40,11 +43,11 @@ import {
 } from './config'
 import { resolveConfigInitError } from './configInitError'
 import { decideControlEndpointConnection } from './controlEndpointConnection'
-import ControlWindow from './ControlWindow'
 import {
-  CONTROL_WINDOW_ORIGIN,
-  shouldForwardUpdateToControlWindow,
-} from './controlWindowEcho'
+  addStableCustomStreamIds,
+  migrateLegacyCustomAssignments,
+  stableCustomStreamId,
+} from './customStreamIdentity'
 import {
   LocalStreamData,
   OVERLAY_DATA_SOURCE_NAME,
@@ -57,12 +60,17 @@ import {
 } from './data'
 import { DataSourceHealthTracker } from './dataSourceHealth'
 import { addFavorite, removeFavorite } from './favorites'
-import { applyGridResize } from './gridResize'
 import {
   addLayoutPreset,
   applyLayoutPreset,
   buildLayoutPreset,
 } from './layoutPresets'
+import { applyLiveTileCount } from './liveWallResize'
+import {
+  normalizeLiveWallState,
+  resizeLiveWallState,
+  updateLiveWallTileSettings,
+} from './liveWallState'
 import { devServerOrigin } from './loadHTML'
 import log, {
   LOG_LEVELS,
@@ -79,6 +87,7 @@ import { flushStorage, loadStorage, safeUpdate } from './storage'
 import StreamdelayClient from './StreamdelayClient'
 import StreamWindow from './StreamWindow'
 import TwitchBot from './TwitchBot'
+import { createTwitchChannelSearch } from './twitchSearch'
 import { checkUplinkCommandGate } from './uplinkCommandGate'
 import { UPLINK_ORIGIN, shouldForwardUpdateToUplink } from './uplinkEcho'
 import { routeUplinkWsMessage } from './uplinkMessageRouting'
@@ -500,6 +509,20 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     join(app.getPath('userData'), 'streamwall-storage.json'),
   )
 
+  const needsLegacyWallMigration = db.data.liveWall == null
+  const originalCustomStreamData = db.data.localStreamData
+  const stableCustomStreamData = addStableCustomStreamIds(
+    originalCustomStreamData,
+  )
+  const liveWallState = normalizeLiveWallState(
+    db.data.liveWall,
+    Math.min(9, argv.grid.cols * argv.grid.rows),
+  )
+  await safeUpdate(db, (data) => {
+    data.localStreamData = stableCustomStreamData
+    data.liveWall = liveWallState
+  })
+
   // Recomputes the same path parseArgs() already read from - fs.existsSync
   // here (rather than threading a flag through the yargs config) keeps this
   // check local to where it's needed, for the "Open Config Folder" menu item
@@ -515,7 +538,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   log.debug('Creating StreamWindow...')
   const idGen = new StreamIDGenerator()
 
-  const localStreamData = new LocalStreamData(db.data.localStreamData)
+  const localStreamData = new LocalStreamData(stableCustomStreamData)
   localStreamData.on('update', (entries) => {
     safeUpdate(db, (data) => {
       data.localStreamData = entries
@@ -525,8 +548,11 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   const overlayStreamData = new LocalStreamData()
 
   const streamWindowConfig = {
-    cols: argv.grid.cols,
-    rows: argv.grid.rows,
+    // `cols`/`rows` remain for protocol compatibility, while tileCount drives
+    // the exact balanced live-wall layout.
+    cols: liveWallState.tileCount,
+    rows: 1,
+    tileCount: liveWallState.tileCount,
     width: argv.window.width,
     height: argv.window.height,
     x: argv.window.x,
@@ -559,11 +585,6 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       snapshotQuality: argv.media['snapshot-quality'],
     },
   )
-  const controlWindow = new ControlWindow({
-    configPath: userConfigPath,
-    hasUserConfig,
-  })
-
   let browseWindow: BrowserWindow | null = null
   let streamdelayClient: StreamdelayClient | null = null
 
@@ -602,13 +623,12 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         const stream = clientState.streams.find((s) => s._id === streamId)
         if (stream) {
           streamWindow.setViews(
-            fullscreenViewContentMap(
-              streamWindowConfig.cols,
-              streamWindowConfig.rows,
-              { url: stream.link, kind: stream.kind || 'video' },
-            ),
+            fullscreenViewContentMap(streamWindowConfig.tileCount ?? 1, 1, {
+              url: stream.link,
+              kind: stream.kind || 'video',
+            }),
             clientState.streams,
-            { parkUnused: true },
+            { parkUnused: true, fillWall: true },
           )
           return
         }
@@ -632,6 +652,12 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         })
       }
       streamWindow.setViews(viewContentMap, clientState.streams)
+      for (let idx = 0; idx < liveWallState.tileCount; idx++) {
+        const settings = liveWallState.tiles[String(idx)]
+        if (settings) {
+          streamWindow.applyWallTileSettings(idx, settings)
+        }
+      }
     } catch (err) {
       log.error('Error updating views', err)
     }
@@ -657,10 +683,16 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   }, 1000)
   stateDoc.on('update', persistStateDoc)
 
+  const persistLiveWall = throttle(() => {
+    void safeUpdate(db, (data) => {
+      data.liveWall = liveWallState
+    })
+  }, 250)
+
   initializeViewsState(
     { viewsState, transact: (fn) => stateDoc.transact(fn) },
-    argv.grid.cols,
-    argv.grid.rows,
+    liveWallState.tileCount,
+    1,
   )
 
   updateViewsFromStateDoc()
@@ -681,6 +713,110 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     },
   })
   playlistScheduler.start()
+
+  function setLiveTileCount(count: number) {
+    clientState = { ...clientState, fullscreenViewIdx: null }
+    applyLiveTileCount(
+      {
+        viewsState,
+        transact: (fn) => stateDoc.transact(fn),
+        setTileCount: (nextCount) => {
+          resizeLiveWallState(liveWallState, nextCount)
+          streamWindow.setTileCount(nextCount)
+        },
+        knownStreamIds: new Set([
+          ...clientState.streams.map((stream) => stream._id),
+          ...[...localStreamData.dataByURL.values()]
+            .map((stream) => stream._id)
+            .filter((id): id is string => typeof id === 'string'),
+        ]),
+      },
+      count,
+    )
+    persistLiveWall()
+    updateState({})
+  }
+
+  function setLiveWallStream(viewIdx: number, input: string) {
+    if (viewIdx < 0 || viewIdx >= liveWallState.tileCount) {
+      return
+    }
+    const cell = viewsState.get(String(viewIdx))
+    if (!cell) {
+      return
+    }
+    if (!input.trim()) {
+      stateDoc.transact(() => cell.set('streamId', undefined))
+      return
+    }
+
+    const login = twitchLoginFromInput(input)
+    if (!login) {
+      log.warn('Ignoring invalid Twitch channel input:', input)
+      return
+    }
+    const url = twitchChannelUrl(login)
+    const existing =
+      clientState.streams.byURL?.get(url) ??
+      clientState.streams.find((stream) => stream.link === url)
+    const streamId = existing?._id ?? stableCustomStreamId(url)
+    if (!existing) {
+      localStreamData.update(url, {
+        link: url,
+        kind: 'video',
+        label: login,
+        _id: streamId,
+      })
+    }
+    stateDoc.transact(() => cell.set('streamId', streamId))
+  }
+
+  function persistWallMediaCommand(command: WallControlCommand) {
+    switch (command.type) {
+      case 'set-wall-playback':
+        updateLiveWallTileSettings(liveWallState, command.viewIdx, {
+          paused: command.paused,
+        })
+        persistLiveWall()
+        break
+      case 'set-wall-volume':
+        updateLiveWallTileSettings(liveWallState, command.viewIdx, {
+          volume: command.volume,
+        })
+        persistLiveWall()
+        break
+      case 'set-wall-audio-mode':
+        updateLiveWallTileSettings(liveWallState, command.viewIdx, {
+          audioMode: command.mode,
+        })
+        persistLiveWall()
+        break
+      case 'set-wall-tile-count':
+        setLiveTileCount(command.count)
+        break
+      case 'set-wall-stream':
+        setLiveWallStream(command.viewIdx, command.username)
+        break
+    }
+  }
+
+  streamWindow.on('control', persistWallMediaCommand)
+
+  const searchTwitchChannels = createTwitchChannelSearch()
+  ipcMain.handle('wall:search-twitch', async (event, query: unknown) => {
+    if (
+      event.sender !== streamWindow.overlayView.webContents ||
+      typeof query !== 'string'
+    ) {
+      return []
+    }
+    try {
+      return await searchTwitchChannels(query)
+    } catch (error) {
+      log.warn('Twitch channel search unavailable:', error)
+      return []
+    }
+  })
 
   const onCommand = async (
     msg: ControlCommand,
@@ -787,27 +923,9 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       log.debug('Setting stream running:', msg.isStreamRunning)
       streamdelayClient.setStreamRunning(msg.isStreamRunning)
     } else if (msg.type === 'set-grid-size') {
-      applyGridResize(
-        {
-          viewsState,
-          transact: (fn) => stateDoc.transact(fn),
-          getCols: () => streamWindowConfig.cols,
-          getRows: () => streamWindowConfig.rows,
-          setGridSize: (cols, rows) => streamWindow.setGridSize(cols, rows),
-        },
-        msg.cols,
-        msg.rows,
-      )
-
-      // streamWindow.config, streamWindowConfig and clientState.config are the
-      // same shared object, and setGridSize mutates it in place. Broadcast that
-      // shared object via updateState({}) rather than detaching a copy, so a
-      // later window resize keeps the overlay/control grid in sync with the wall
-      // (issue #14). The wall itself was already re-laid-out by the stateDoc
-      // observer during applyGridResize's transact — now that the config holds
-      // the new dimensions (issue #15) — so no explicit updateViewsFromStateDoc()
-      // call is needed here.
-      updateState({})
+      // Compatibility for remote controllers: collapse their rectangular
+      // request into this branch's exact 1-9 live-wall capacity.
+      setLiveTileCount(Math.min(9, msg.cols * msg.rows))
     } else if (msg.type === 'save-layout-preset') {
       log.debug('Saving layout preset:', msg.name)
       const preset = buildLayoutPreset(
@@ -877,7 +995,6 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   function updateState(newState: Partial<StreamwallState>) {
     clientState = { ...clientState, ...newState }
     streamWindow.onState(clientState)
-    controlWindow.onState(clientState)
     stateEmitter.emit('state', clientState)
   }
 
@@ -900,31 +1017,8 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     streamWindow.onState(clientState)
   })
 
-  // Control <- main collab updates
-  stateDoc.on('update', (update, origin) => {
-    if (!shouldForwardUpdateToControlWindow(origin)) {
-      return
-    }
-    controlWindow.onYDocUpdate(update)
-  })
-
-  // Control <- main init state
-  controlWindow.on('load', () => {
-    controlWindow.onState(clientState)
-    controlWindow.onYDocUpdate(Y.encodeStateAsUpdate(stateDoc))
-  })
-
-  // Control -> main
-  controlWindow.on('ydoc', (update) =>
-    Y.applyUpdate(stateDoc, update, CONTROL_WINDOW_ORIGIN),
-  )
-  controlWindow.setCommandHandler((command) =>
-    dispatchLocalCommand(onCommand, command),
-  )
-
-  // Closing either top-level window quits the app, except on macOS where the
-  // convention is to hide the window and keep the app (and its dock icon)
-  // running until the user explicitly quits.
+  // This branch intentionally has one top-level window: the wall is also the
+  // controller. On macOS it follows the usual hide-on-close convention.
   let isQuitting = false
   let storageFlushed = false
   app.on('before-quit', () => {
@@ -932,7 +1026,6 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   })
   app.on('activate', () => {
     streamWindow.win.show()
-    controlWindow.win.show()
   })
 
   function handleWindowClose(win: BrowserWindow, event: ElectronEvent) {
@@ -945,9 +1038,6 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   }
   streamWindow.on('close', (event) =>
     handleWindowClose(streamWindow.win, event),
-  )
-  controlWindow.on('close', (event) =>
-    handleWindowClose(controlWindow.win, event),
   )
 
   // Standard Electron convention as a safety net: if every window somehow
@@ -969,7 +1059,10 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       return
     }
     event.preventDefault()
-    flushStorage(db, () => persistStateDoc.flush())
+    flushStorage(db, () => {
+      persistStateDoc.flush()
+      persistLiveWall.flush()
+    })
       .catch((err) => {
         log.error('Failed to flush storage before quit', err)
       })
@@ -1124,8 +1217,18 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     markDataSource(overlayStreamData.gen(), OVERLAY_DATA_SOURCE_NAME),
   ]
 
+  let legacyWallMigrationPending = needsLegacyWallMigration
   for await (const streams of combineDataSources(dataSources, idGen)) {
     updateState({ streams })
+    if (legacyWallMigrationPending) {
+      migrateLegacyCustomAssignments({
+        viewsState,
+        transact: (fn) => stateDoc.transact(fn),
+        customEntries: originalCustomStreamData,
+        knownStreamIds: new Set(streams.map((stream) => stream._id)),
+      })
+      legacyWallMigrationPending = false
+    }
     updateViewsFromStateDoc()
     // Newly-loaded stream data may resolve a playlist URL that failed to
     // resolve on startup or a prior interval tick; fill it in immediately

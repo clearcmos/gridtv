@@ -18,7 +18,7 @@ afterEach(() => {
 function renderControls({
   isPaused = false,
   volume = 0.8,
-  audioMode = 'stage' as const,
+  audioMode = 'muted' as const,
   onControl = vi.fn<(command: WallControlCommand) => void>(),
 } = {}) {
   container = document.createElement('div')
@@ -27,6 +27,7 @@ function renderControls({
     render(
       <WallMediaControls
         viewId={17}
+        viewIdx={3}
         isPaused={isPaused}
         volume={volume}
         audioMode={audioMode}
@@ -53,6 +54,7 @@ describe('WallMediaControls', () => {
     expect(onControl).toHaveBeenCalledWith({
       type: 'set-wall-playback',
       viewId: 17,
+      viewIdx: 3,
       paused: true,
     })
   })
@@ -65,6 +67,7 @@ describe('WallMediaControls', () => {
     expect(onControl).toHaveBeenCalledWith({
       type: 'set-wall-playback',
       viewId: 17,
+      viewIdx: 3,
       paused: false,
     })
   })
@@ -83,25 +86,26 @@ describe('WallMediaControls', () => {
     expect(onControl).toHaveBeenCalledWith({
       type: 'set-wall-volume',
       viewId: 17,
+      viewIdx: 3,
       volume: 0.35,
     })
   })
 
-  test('cycles the speaker from Stage to Muted', () => {
+  test('toggles the speaker from Muted to Unmuted', () => {
     const { root, onControl } = renderControls()
 
-    click(root.querySelector('[aria-label="Audio mode: Stage"]')!)
+    click(root.querySelector('[aria-label="Audio mode: Muted"]')!)
 
     expect(onControl).toHaveBeenCalledWith({
       type: 'set-wall-audio-mode',
       viewId: 17,
-      mode: 'muted',
+      viewIdx: 3,
+      mode: 'unmuted',
     })
   })
 
-  test('cycles all three audio modes in the requested order', () => {
-    expect(nextWallAudioMode('stage')).toBe('muted')
+  test('toggles between exactly two audio modes', () => {
     expect(nextWallAudioMode('muted')).toBe('unmuted')
-    expect(nextWallAudioMode('unmuted')).toBe('stage')
+    expect(nextWallAudioMode('unmuted')).toBe('muted')
   })
 })

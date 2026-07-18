@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'preact/hooks'
+import { FaEdit, FaPlus } from 'react-icons/fa'
 import {
+  computeLiveTileLayout,
   StreamwallState,
+  twitchLoginFromInput,
+  type TwitchChannelSuggestion,
   type ViewPos,
+  type ViewState,
   type WallControlCommand,
 } from 'streamwall-shared'
 import { styled } from 'styled-components'
 import { matchesState } from 'xstate'
 import packageInfo from '../../package.json'
+import { GridSizeMenu } from './GridSizeMenu'
 import { LAYER_FRAME_SANDBOX } from './layerFrameSandbox'
 import { OverlayViewTile } from './OverlayViewTile'
+import { StreamPickerDialog } from './StreamPickerDialog'
 import { WallMediaControls } from './WallMediaControls'
 
 // Extracted from overlay.tsx so it can be rendered and tested in isolation,
@@ -17,78 +24,158 @@ export function Overlay({
   config,
   views,
   streams,
+  fullscreenViewIdx,
   onControl,
-}: Pick<StreamwallState, 'config' | 'views' | 'streams'> & {
+  onSearchTwitch = async () => [],
+  gridMenuShortcut = 0,
+}: Pick<
+  StreamwallState,
+  'config' | 'views' | 'streams' | 'fullscreenViewIdx'
+> & {
   onControl: (command: WallControlCommand) => void
+  onSearchTwitch?: (query: string) => Promise<TwitchChannelSuggestion[]>
+  gridMenuShortcut?: number
 }) {
   const { width, height, activeColor } = config
+  const tileCount = config.tileCount ?? config.cols * config.rows
+  const [isGridMenuOpen, setGridMenuOpen] = useState(false)
+  const [pickerViewIdx, setPickerViewIdx] = useState<number | null>(null)
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'F1') {
+        event.preventDefault()
+        setPickerViewIdx(null)
+        setGridMenuOpen((open) => !open)
+      } else if (event.key === 'Escape' && isGridMenuOpen) {
+        event.preventDefault()
+        setGridMenuOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isGridMenuOpen])
+
+  useEffect(() => {
+    if (gridMenuShortcut > 0) {
+      setPickerViewIdx(null)
+      setGridMenuOpen((open) => !open)
+    }
+  }, [gridMenuShortcut])
+
   // Keep error views on the wall (instead of leaving a silent black cell) so the
   // failure and its reason are visible; they are rendered as an error tile below.
   const activeViews = views.filter(({ state }) =>
     matchesState('displaying', state),
   )
   const overlays = streams.filter((s) => s.kind === 'overlay')
+
+  const viewsBySpace = new Map<number, ViewState>()
+  for (const view of activeViews) {
+    for (const space of view.context.pos?.spaces ?? []) {
+      viewsBySpace.set(space, view)
+    }
+  }
+
+  function renderTile(viewIdx: number, pos: ViewPos, view?: ViewState) {
+    const { state, context } = view ?? {
+      state: 'empty' as const,
+      context: null,
+    }
+    const content = context?.content
+    const data = content
+      ? streams.find((stream) => content.url === stream.link)
+      : undefined
+    const isError = view ? matchesState('displaying.error', state) : false
+    const wallAudioMode = context?.wallAudioMode ?? 'muted'
+    const isAudible = wallAudioMode === 'unmuted'
+    const isBlurred = view
+      ? matchesState('displaying.running.video.blurred', state)
+      : false
+    const isLoading = view
+      ? matchesState('displaying.loading', state) ||
+        matchesState('displaying.running.playback.stalled', state)
+      : false
+
+    return (
+      <SpaceBorder
+        key={viewIdx}
+        $pos={pos}
+        $windowWidth={width}
+        $windowHeight={height}
+        $activeColor={activeColor}
+        $isListening={isAudible}
+        $isError={isError}
+      >
+        {content && (
+          <OverlayViewTile
+            url={content.url}
+            data={data}
+            isError={isError}
+            errorReason={context?.error}
+            isListening={isAudible}
+            isBackgroundListening={false}
+            isBlurred={isBlurred}
+            isLoading={isLoading}
+            activeColor={activeColor}
+          />
+        )}
+        {!content && (
+          <EmptyTile>
+            <span>Empty tile {viewIdx + 1}</span>
+          </EmptyTile>
+        )}
+        {view && context && (
+          <WallMediaControls
+            viewId={context.id}
+            viewIdx={viewIdx}
+            isPaused={context.isPaused ?? false}
+            volume={context.volume}
+            audioMode={wallAudioMode}
+            onControl={onControl}
+          />
+        )}
+        <TilePickerButton
+          data-wall-tile-picker
+          type="button"
+          aria-label={`Choose stream for tile ${viewIdx + 1}`}
+          title={`Choose stream for tile ${viewIdx + 1}`}
+          $empty={!content}
+          onClick={() => {
+            setGridMenuOpen(false)
+            setPickerViewIdx(viewIdx)
+          }}
+        >
+          {content ? <FaEdit /> : <FaPlus />}
+        </TilePickerButton>
+      </SpaceBorder>
+    )
+  }
+
+  const normalTiles = computeLiveTileLayout(tileCount, width, height).map(
+    (pos) => {
+      const viewIdx = pos.spaces[0]
+      return renderTile(viewIdx, pos, viewsBySpace.get(viewIdx))
+    },
+  )
+  const fullscreenTiles = activeViews.flatMap((view) => {
+    const { pos } = view.context
+    if (!pos) {
+      return []
+    }
+    return [renderTile(fullscreenViewIdx ?? pos.spaces[0] ?? 0, pos, view)]
+  })
+
+  const pickerView =
+    pickerViewIdx == null ? undefined : viewsBySpace.get(pickerViewIdx)
+  const pickerInitialValue = pickerView?.context.content
+    ? (twitchLoginFromInput(pickerView.context.content.url) ?? '')
+    : ''
+
   return (
     <OverlayContainer>
       <VersionFooter />
-      {activeViews.map(({ state, context }) => {
-        const { content, pos } = context
-        if (!content || !pos) {
-          return
-        }
-
-        const data = streams.find((d) => content.url === d.link)
-        const isError = matchesState('displaying.error', state)
-        const isListening = matchesState(
-          'displaying.running.audio.listening',
-          state,
-        )
-        const isBackgroundListening = matchesState(
-          'displaying.running.audio.background',
-          state,
-        )
-        const wallAudioMode = context.wallAudioMode ?? 'stage'
-        const isAudible =
-          wallAudioMode === 'unmuted' ||
-          (wallAudioMode === 'stage' && (isListening || isBackgroundListening))
-        const isBlurred = matchesState(
-          'displaying.running.video.blurred',
-          state,
-        )
-        const isLoading =
-          matchesState('displaying.loading', state) ||
-          matchesState('displaying.running.playback.stalled', state)
-        return (
-          <SpaceBorder
-            key={pos.spaces[0]}
-            $pos={pos}
-            $windowWidth={width}
-            $windowHeight={height}
-            $activeColor={activeColor}
-            $isListening={isAudible}
-            $isError={isError}
-          >
-            <OverlayViewTile
-              url={content.url}
-              data={data}
-              isError={isError}
-              errorReason={context.error}
-              isListening={isAudible}
-              isBackgroundListening={false}
-              isBlurred={isBlurred}
-              isLoading={isLoading}
-              activeColor={activeColor}
-            />
-            <WallMediaControls
-              viewId={context.id}
-              isPaused={context.isPaused ?? false}
-              volume={context.volume}
-              audioMode={wallAudioMode}
-              onControl={onControl}
-            />
-          </SpaceBorder>
-        )
-      })}
+      {fullscreenViewIdx == null ? normalTiles : fullscreenTiles}
       {overlays.map((s) => (
         <OverlayIFrame
           key={s._id}
@@ -98,6 +185,32 @@ export function Overlay({
           scrolling="no"
         />
       ))}
+      {isGridMenuOpen && (
+        <GridSizeMenu
+          currentCount={tileCount}
+          onSelect={(count) => {
+            onControl({ type: 'set-wall-tile-count', count })
+            setGridMenuOpen(false)
+          }}
+          onClose={() => setGridMenuOpen(false)}
+        />
+      )}
+      {pickerViewIdx != null && (
+        <StreamPickerDialog
+          viewIdx={pickerViewIdx}
+          initialValue={pickerInitialValue}
+          onSearch={onSearchTwitch}
+          onSubmit={(username) => {
+            onControl({
+              type: 'set-wall-stream',
+              viewIdx: pickerViewIdx,
+              username,
+            })
+            setPickerViewIdx(null)
+          }}
+          onClose={() => setPickerViewIdx(null)}
+        />
+      )}
     </OverlayContainer>
   )
 }
@@ -168,6 +281,59 @@ const SpaceBorder = styled.div.attrs<{
     opacity: 1;
     pointer-events: auto;
     transform: translate(-50%, 0);
+  }
+
+  &:hover [data-wall-tile-picker],
+  &:focus-within [data-wall-tile-picker] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+`
+
+const EmptyTile = styled.div`
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: clamp(10px, 5cqh, 16px);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+`
+
+const TilePickerButton = styled.button<{ $empty: boolean }>`
+  position: absolute;
+  top: clamp(5px, 3cqh, 12px);
+  right: clamp(5px, 3cqh, 12px);
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  width: clamp(27px, 11cqh, 40px);
+  height: clamp(27px, 11cqh, 40px);
+  padding: 0;
+  color: white;
+  background: rgba(8, 10, 14, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: clamp(5px, 2cqh, 9px);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  opacity: ${({ $empty }) => ($empty ? 0.68 : 0)};
+  pointer-events: ${({ $empty }) => ($empty ? 'auto' : 'none')};
+  cursor: pointer;
+  transition: opacity 120ms ease-out;
+
+  &:hover,
+  &:focus-visible {
+    opacity: 1;
+    background: rgba(145, 71, 255, 0.9);
+    outline: 2px solid white;
+    outline-offset: 1px;
+  }
+
+  svg {
+    width: 42%;
+    height: 42%;
   }
 `
 

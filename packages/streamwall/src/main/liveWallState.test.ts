@@ -1,0 +1,65 @@
+import { describe, expect, it } from 'vitest'
+import {
+  normalizeLiveWallState,
+  resizeLiveWallState,
+  updateLiveWallTileSettings,
+} from './liveWallState'
+
+describe('live wall stored state', () => {
+  it('creates defaults for an older database with no live-wall state', () => {
+    expect(normalizeLiveWallState(undefined, 4)).toEqual({
+      tileCount: 4,
+      tiles: {
+        '0': { audioMode: 'muted', volume: 1, paused: false },
+        '1': { audioMode: 'muted', volume: 1, paused: false },
+        '2': { audioMode: 'muted', volume: 1, paused: false },
+        '3': { audioMode: 'muted', volume: 1, paused: false },
+      },
+    })
+  })
+
+  it('sanitizes malformed values and drops settings beyond the tile count', () => {
+    expect(
+      normalizeLiveWallState(
+        {
+          tileCount: 2,
+          tiles: {
+            '0': { audioMode: 'unmuted', volume: 2, paused: true },
+            '1': { audioMode: 'stage', volume: 'loud', paused: false },
+            '2': { audioMode: 'unmuted', volume: 0.5, paused: true },
+          },
+        },
+        9,
+      ),
+    ).toEqual({
+      tileCount: 2,
+      tiles: {
+        '0': { audioMode: 'unmuted', volume: 1, paused: true },
+        '1': { audioMode: 'muted', volume: 1, paused: false },
+      },
+    })
+  })
+
+  it('preserves surviving settings while resizing and defaults new slots', () => {
+    const state = normalizeLiveWallState(undefined, 2)
+    updateLiveWallTileSettings(state, 1, {
+      audioMode: 'unmuted',
+      volume: 0.4,
+    })
+    resizeLiveWallState(state, 4)
+    expect(state.tiles['1']).toEqual({
+      audioMode: 'unmuted',
+      volume: 0.4,
+      paused: false,
+    })
+    expect(state.tiles['3']).toEqual({
+      audioMode: 'muted',
+      volume: 1,
+      paused: false,
+    })
+
+    resizeLiveWallState(state, 1)
+    expect(state.tileCount).toBe(1)
+    expect(Object.keys(state.tiles)).toEqual(['0'])
+  })
+})

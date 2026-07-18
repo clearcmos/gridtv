@@ -14,6 +14,7 @@ import path from 'path'
 import {
   boxesFromViewContentMap,
   computeBoxRect,
+  computeLiveTileLayout,
   ContentDisplayOptions,
   StreamData,
   StreamList,
@@ -55,6 +56,7 @@ export interface StreamWindowEventMap {
   close: [ElectronEvent]
   state: [ViewState[]]
   resize: []
+  control: [WallControlCommand]
 }
 
 export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
@@ -73,11 +75,6 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   backgroundView: WebContentsView
   overlayView: WebContentsView
   views: Map<number, ViewActor>
-  // Wall-side speaker overrides are deliberately kept outside the view state
-  // machine: that machine continues tracking the staging window's audio state,
-  // so switching an override back to `stage` can immediately restore whatever
-  // the operator most recently selected there.
-  wallAudioModes: Map<number, WallAudioMode>
   // Actors temporarily excluded from `views` (and therefore from
   // `emitState()`) while a fullscreen expansion hides them behind the
   // expanded view, kept alive instead of torn down so a later collapse can
@@ -105,7 +102,6 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.pauseParkedViews = pauseParkedViews
     this.mediaConfig = mediaConfig
     this.views = new Map()
-    this.wallAudioModes = new Map()
     this.parkedViews = new Map()
     this.viewsByWebContentsId = new Map()
 
@@ -142,6 +138,12 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
     win.removeMenu()
     win.loadURL('about:blank')
+    win.webContents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'F1') {
+        event.preventDefault()
+        this.overlayView?.webContents.send('wall:grid-menu-shortcut')
+      }
+    })
     win.on('close', (event) => this.emit('close', event))
 
     win.once('ready-to-show', () => {
@@ -182,6 +184,12 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
     loadHTML(backgroundView.webContents, 'background')
     this.backgroundView = backgroundView
+    backgroundView.webContents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'F1') {
+        event.preventDefault()
+        this.overlayView?.webContents.send('wall:grid-menu-shortcut')
+      }
+    })
 
     const overlayView = new WebContentsView({
       webPreferences: {
@@ -280,6 +288,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         return
       }
       this.handleWallControl(command.data)
+      this.emit('control', command.data)
     })
   }
 
@@ -332,6 +341,12 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     // Lock the view to its stream URL: deny popups and block navigation/redirect
     // escapes while still allowing the page to reload itself.
     secureStreamView(view.webContents)
+    view.webContents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'F1') {
+        event.preventDefault()
+        this.overlayView.webContents.send('wall:grid-menu-shortcut')
+      }
+    })
 
     return { view, offscreenWin: this.offscreenWin }
   }
@@ -445,10 +460,6 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         return
       }
       lastSnapshot = snapshot
-      // Actor entry actions apply the staging mute state. Reapply any wall
-      // override after every transition, including a seamless content swap
-      // that promotes a new WebContentsView into this actor.
-      this.applyWallAudioMode(actor)
       this.emitState()
     })
 
@@ -469,7 +480,8 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
           pos: context.pos,
           error: context.error,
           volume: context.volume,
-          wallAudioMode: this.wallAudioModes.get(context.id) ?? 'stage',
+          wallAudioMode:
+            (context.desiredAudio ?? 'muted') === 'muted' ? 'muted' : 'unmuted',
           isPaused: context.desiredPaused,
         },
       } satisfies ViewState
@@ -494,14 +506,57 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.config.rows = rows
   }
 
+  /** Switches the live-only wall to an exact number of edge-to-edge slots. */
+  setTileCount(count: number) {
+    this.config.tileCount = count
+    // Keep the legacy grid fields internally consistent for state consumers
+    // that have not learned about tileCount; the live layout uses tileCount.
+    this.config.cols = count
+    this.config.rows = 1
+  }
+
   setViews(
     viewContentMap: ViewContentMap,
     streams: StreamList,
-    { parkUnused = false }: { parkUnused?: boolean } = {},
+    {
+      parkUnused = false,
+      fillWall = false,
+    }: { parkUnused?: boolean; fillWall?: boolean } = {},
   ) {
     const { width, height, cols, rows } = this.config
     const { views } = this
-    const boxes = boxesFromViewContentMap(cols, rows, viewContentMap)
+    const tileCount = this.config.tileCount
+    const gridBoxes = boxesFromViewContentMap(cols, rows, viewContentMap)
+    const firstContent = viewContentMap.values().next().value as
+      ViewContent | undefined
+    const boxes = fillWall
+      ? firstContent
+        ? [
+            {
+              content: firstContent,
+              spaces: [...Array(tileCount ?? Math.max(1, cols * rows)).keys()],
+              rect: { x: 0, y: 0, width, height },
+            },
+          ]
+        : []
+      : tileCount == null
+        ? gridBoxes.map((box) => ({
+            content: box.content,
+            spaces: box.spaces,
+            rect: computeBoxRect(cols, rows, width, height, box),
+          }))
+        : computeLiveTileLayout(tileCount, width, height)
+            .map((pos) => ({
+              content: viewContentMap.get(String(pos.spaces[0])),
+              spaces: pos.spaces,
+              rect: {
+                x: pos.x,
+                y: pos.y,
+                width: pos.width,
+                height: pos.height,
+              },
+            }))
+            .filter((box) => box.content !== undefined)
     const remainingBoxes = new Set(boxes)
     // Views parked by a previous `parkUnused` call are reuse candidates too,
     // so a fullscreen collapse can find and reposition them via the matchers
@@ -594,10 +649,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         continue
       }
 
-      const pos = {
-        ...computeBoxRect(cols, rows, width, height, box),
-        spaces,
-      }
+      const pos = { ...box.rect, spaces }
 
       view.send({ type: 'DISPLAY', pos, content })
       view.send({ type: 'OPTIONS', options: getDisplayOptions(stream) })
@@ -631,7 +683,6 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (next) {
         disposeView(next.view, next.offscreenWin)
       }
-      this.wallAudioModes.delete(viewId)
     }
     this.views = newViews
     this.emitState()
@@ -650,10 +701,6 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
           ? (context.pos?.spaces.includes(viewIdx) ?? false)
           : false
       view.send({ type: isSelectedView ? 'UNMUTE' : 'MUTE' })
-      // A background staging view can intentionally ignore MUTE without an
-      // actor transition; apply explicitly instead of relying only on the
-      // actor subscription above.
-      this.applyWallAudioMode(view)
     }
   }
 
@@ -677,9 +724,6 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     view?.send({
       type: listening ? 'BACKGROUND' : 'UNBACKGROUND',
     })
-    if (view) {
-      this.applyWallAudioMode(view)
-    }
   }
 
   setViewBlurred(viewIdx: number, blurred: boolean) {
@@ -690,30 +734,12 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.sendViewEvent(viewIdx, { type: 'SET_VOLUME', volume })
   }
 
-  /** Apply one wall speaker mode without altering the staging audio state. */
-  applyWallAudioMode(view: ViewActor) {
-    const { id, desiredAudio, view: contentView } = view.getSnapshot().context
-    const mode = this.wallAudioModes.get(id) ?? 'stage'
-    const shouldMute =
-      mode === 'muted' ||
-      (mode === 'stage' && (desiredAudio ?? 'muted') === 'muted')
-    if (contentView?.webContents) {
-      contentView.webContents.audioMuted = shouldMute
-    }
-  }
-
   setWallAudioMode(viewId: number, mode: WallAudioMode) {
     const view = this.views.get(viewId)
     if (!view) {
       return
     }
-    if (mode === 'stage') {
-      this.wallAudioModes.delete(viewId)
-    } else {
-      this.wallAudioModes.set(viewId, mode)
-    }
-    this.applyWallAudioMode(view)
-    this.emitState()
+    view.send({ type: mode === 'muted' ? 'MUTE' : 'UNMUTE' })
   }
 
   setWallPlayback(viewId: number, paused: boolean) {
@@ -722,6 +748,21 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
 
   setWallVolume(viewId: number, volume: number) {
     this.views.get(viewId)?.send({ type: 'SET_VOLUME', volume })
+  }
+
+  /** Restores persisted live-wall controls for the actor occupying one slot. */
+  applyWallTileSettings(
+    viewIdx: number,
+    settings: { audioMode: WallAudioMode; volume: number; paused: boolean },
+  ) {
+    const view = this.findViewByIdx(viewIdx)
+    if (!view) {
+      return
+    }
+    const viewId = view.getSnapshot().context.id
+    this.setWallVolume(viewId, settings.volume)
+    this.setWallAudioMode(viewId, settings.audioMode)
+    this.setWallPlayback(viewId, settings.paused)
   }
 
   handleWallControl(command: WallControlCommand) {
@@ -734,6 +775,11 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         break
       case 'set-wall-audio-mode':
         this.setWallAudioMode(command.viewId, command.mode)
+        break
+      case 'set-wall-tile-count':
+      case 'set-wall-stream':
+        // Main owns the persisted layout/source data and handles these after
+        // the validated command is emitted through StreamWindowEventMap.
         break
     }
   }

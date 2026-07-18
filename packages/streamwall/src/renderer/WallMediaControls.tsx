@@ -3,7 +3,6 @@ import { useCallback } from 'preact/hooks'
 import {
   FaPause,
   FaPlay,
-  FaSlidersH,
   FaVolumeDown,
   FaVolumeMute,
   FaVolumeUp,
@@ -12,9 +11,8 @@ import type { WallAudioMode, WallControlCommand } from 'streamwall-shared'
 import { styled } from 'styled-components'
 
 const NEXT_AUDIO_MODE: Record<WallAudioMode, WallAudioMode> = {
-  stage: 'muted',
   muted: 'unmuted',
-  unmuted: 'stage',
+  unmuted: 'muted',
 }
 
 export function nextWallAudioMode(mode: WallAudioMode): WallAudioMode {
@@ -22,7 +20,6 @@ export function nextWallAudioMode(mode: WallAudioMode): WallAudioMode {
 }
 
 const AUDIO_MODE_LABEL: Record<WallAudioMode, string> = {
-  stage: 'Stage',
   muted: 'Muted',
   unmuted: 'Unmuted',
 }
@@ -34,17 +31,19 @@ function AudioModeIcon({ mode }: { mode: WallAudioMode }) {
   if (mode === 'unmuted') {
     return <FaVolumeUp />
   }
-  return <FaSlidersH />
+  return <FaVolumeUp />
 }
 
 export function WallMediaControls({
   viewId,
+  viewIdx,
   isPaused,
   volume,
   audioMode,
   onControl,
 }: {
   viewId: number
+  viewIdx: number
   isPaused: boolean
   volume: number
   audioMode: WallAudioMode
@@ -54,9 +53,10 @@ export function WallMediaControls({
     onControl({
       type: 'set-wall-playback',
       viewId,
+      viewIdx,
       paused: !isPaused,
     })
-  }, [isPaused, onControl, viewId])
+  }, [isPaused, onControl, viewId, viewIdx])
 
   const handleVolumeInput = useCallback<
     JSX.InputEventHandler<HTMLInputElement>
@@ -65,19 +65,21 @@ export function WallMediaControls({
       onControl({
         type: 'set-wall-volume',
         viewId,
+        viewIdx,
         volume: Number(event.currentTarget.value),
       })
     },
-    [onControl, viewId],
+    [onControl, viewId, viewIdx],
   )
 
   const handleAudioModeClick = useCallback(() => {
     onControl({
       type: 'set-wall-audio-mode',
       viewId,
+      viewIdx,
       mode: nextWallAudioMode(audioMode),
     })
-  }, [audioMode, onControl, viewId])
+  }, [audioMode, onControl, viewId, viewIdx])
 
   const modeLabel = AUDIO_MODE_LABEL[audioMode]
   const nextModeLabel = AUDIO_MODE_LABEL[nextWallAudioMode(audioMode)]
@@ -221,7 +223,7 @@ const AudioModeButton = styled(ControlButton)<{ $mode: WallAudioMode }>`
     if ($mode === 'muted') {
       return 'rgba(220, 38, 38, 0.92)'
     }
-    return 'rgba(59, 130, 246, 0.84)'
+    return 'rgba(220, 38, 38, 0.92)'
   }};
 
   svg {

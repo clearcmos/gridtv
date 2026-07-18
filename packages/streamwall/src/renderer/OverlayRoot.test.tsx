@@ -6,7 +6,7 @@ import type {
   StreamWindowConfig,
   ViewState,
 } from 'streamwall-shared'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { Overlay } from './OverlayRoot'
 
 let container: HTMLDivElement | undefined
@@ -23,6 +23,7 @@ function makeConfig(cols: number): StreamWindowConfig {
   return {
     cols,
     rows: 1,
+    tileCount: cols,
     width: 100 * cols,
     height: 100,
     frameless: false,
@@ -72,6 +73,7 @@ function renderOverlay(
         config={makeConfig(views.length)}
         views={views}
         streams={streams}
+        fullscreenViewIdx={null}
         onControl={() => {}}
       />,
       container!,
@@ -113,9 +115,10 @@ describe('overlay view identity across a shrinking view list', () => {
     act(() => {
       render(
         <Overlay
-          config={makeConfig(1)}
+          config={makeConfig(2)}
           views={[makeView(1, 'view-1')]}
           streams={streams}
+          fullscreenViewIdx={null}
           onControl={() => {}}
         />,
         root,
@@ -128,5 +131,105 @@ describe('overlay view identity across a shrinking view list', () => {
       'expected to still find a tile for view-1',
     ).not.toBeUndefined()
     expect(tileAfter).toBe(tileBefore)
+  })
+})
+
+describe('self-contained wall controls', () => {
+  test('F1 opens the 1-9 tile picker and selecting a number sends the exact count', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(4)}
+          views={[]}
+          streams={[]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F1' }))
+    })
+    expect(container.querySelector('[data-testid="grid-size-menu"]')).not.toBe(
+      null,
+    )
+
+    const twoTiles = container.querySelector('[aria-label="2 tiles"]')!
+    act(() => {
+      twoTiles.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'set-wall-tile-count',
+      count: 2,
+    })
+    expect(container.querySelector('[data-testid="grid-size-menu"]')).toBe(null)
+  })
+
+  test('renders a stream chooser for every slot, including empty ones', () => {
+    const root = renderOverlay([makeView(0, 'view-0')], [makeStream('view-0')])
+    // renderOverlay uses a one-tile config; re-render it as four slots.
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(4)}
+          views={[makeView(0, 'view-0')]}
+          streams={[makeStream('view-0')]}
+          fullscreenViewIdx={null}
+          onControl={() => {}}
+        />,
+        root,
+      )
+    })
+
+    expect(root.querySelectorAll('[data-wall-tile-picker]')).toHaveLength(4)
+    expect(root.textContent).toContain('Empty tile 4')
+  })
+
+  test('replaces an empty tile from a bare Twitch username', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(2)}
+          views={[]}
+          streams={[]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+
+    const picker = container.querySelector(
+      '[aria-label="Choose stream for tile 2"]',
+    )!
+    act(() => {
+      picker.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const input = container.querySelector(
+      '[aria-label="Twitch username"]',
+    ) as HTMLInputElement
+    act(() => {
+      input.value = 'lacy'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => {
+      input.form!.dispatchEvent(
+        new SubmitEvent('submit', { bubbles: true, cancelable: true }),
+      )
+    })
+
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'set-wall-stream',
+      viewIdx: 1,
+      username: 'lacy',
+    })
   })
 })

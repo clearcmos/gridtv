@@ -47,7 +47,6 @@ function makeStreamWindow(config: StreamWindowConfig) {
   >
   sw.config = config
   sw.parkedViews = new Map()
-  sw.wallAudioModes = new Map()
   sw.pauseParkedViews = false
   return sw
 }
@@ -159,7 +158,6 @@ describe('StreamWindow.emitState', () => {
 
   it('includes wall audio mode and paused state in the emitted view context', () => {
     const sw = makeStreamWindow(makeConfig())
-    sw.wallAudioModes.set(1, 'unmuted')
     sw.views = new Map([
       [
         1,
@@ -172,6 +170,7 @@ describe('StreamWindow.emitState', () => {
             pos: null,
             error: null,
             volume: 0.6,
+            desiredAudio: 'listening',
             desiredPaused: true,
           },
         }),
@@ -216,35 +215,16 @@ function makeWallControlActor({
 }
 
 describe('StreamWindow wall media controls', () => {
-  it('Stage mode follows the staging audio state', () => {
+  it('routes the two audio states directly to the selected actor', () => {
     const sw = makeStreamWindow(makeConfig())
-    const { actor, context, webContents } = makeWallControlActor()
-
-    sw.applyWallAudioMode(actor)
-    expect(webContents.audioMuted).toBe(true)
-
-    context.desiredAudio = 'background'
-    sw.applyWallAudioMode(actor)
-    expect(webContents.audioMuted).toBe(false)
-  })
-
-  it('Muted and Unmuted override staging without rewriting it', () => {
-    const sw = makeStreamWindow(makeConfig())
-    const { actor, context, webContents } = makeWallControlActor()
+    const { actor, send } = makeWallControlActor()
     sw.views = new Map([[17, actor]])
 
     sw.setWallAudioMode(17, 'unmuted')
-    expect(webContents.audioMuted).toBe(false)
-    expect(context.desiredAudio).toBe('muted')
-
-    context.desiredAudio = 'listening'
     sw.setWallAudioMode(17, 'muted')
-    expect(webContents.audioMuted).toBe(true)
-    expect(context.desiredAudio).toBe('listening')
 
-    sw.setWallAudioMode(17, 'stage')
-    expect(webContents.audioMuted).toBe(false)
-    expect(context.desiredAudio).toBe('listening')
+    expect(send).toHaveBeenCalledWith({ type: 'UNMUTE' })
+    expect(send).toHaveBeenCalledWith({ type: 'MUTE' })
   })
 
   it('keeps every wall-Unmuted tile audible simultaneously', () => {
@@ -259,10 +239,8 @@ describe('StreamWindow wall media controls', () => {
     sw.setWallAudioMode(17, 'unmuted')
     sw.setWallAudioMode(18, 'unmuted')
 
-    expect(first.webContents.audioMuted).toBe(false)
-    expect(second.webContents.audioMuted).toBe(false)
-    expect(first.context.desiredAudio).toBe('muted')
-    expect(second.context.desiredAudio).toBe('muted')
+    expect(first.send).toHaveBeenCalledWith({ type: 'UNMUTE' })
+    expect(second.send).toHaveBeenCalledWith({ type: 'UNMUTE' })
   })
 
   it('routes playback and volume commands to the selected view actor', () => {
@@ -273,11 +251,13 @@ describe('StreamWindow wall media controls', () => {
     sw.handleWallControl({
       type: 'set-wall-playback',
       viewId: 17,
+      viewIdx: 0,
       paused: true,
     })
     sw.handleWallControl({
       type: 'set-wall-volume',
       viewId: 17,
+      viewIdx: 0,
       volume: 0.4,
     })
 
@@ -293,16 +273,19 @@ describe('StreamWindow wall media controls', () => {
     sw.handleWallControl({
       type: 'set-wall-playback',
       viewId: 99,
+      viewIdx: 0,
       paused: true,
     })
     sw.handleWallControl({
       type: 'set-wall-volume',
       viewId: 99,
+      viewIdx: 0,
       volume: 0.4,
     })
     sw.handleWallControl({
       type: 'set-wall-audio-mode',
       viewId: 99,
+      viewIdx: 0,
       mode: 'unmuted',
     })
 

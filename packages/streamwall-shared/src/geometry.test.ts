@@ -3,7 +3,9 @@ import type { ViewContent } from './geometry.ts'
 import {
   boxesFromViewContentMap,
   clampGridDimension,
+  clampLiveTileCount,
   computeBoxRect,
+  computeLiveTileLayout,
   fullscreenViewContentMap,
   GRID_MAX,
   GRID_MIN,
@@ -13,6 +15,41 @@ import {
   parseGridDimensionInput,
   remapGridAssignments,
 } from './geometry.ts'
+
+describe('computeLiveTileLayout', () => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])(
+    'creates exactly %i sequential tile slots',
+    (count) => {
+      const layout = computeLiveTileLayout(count, 901, 509)
+      expect(layout).toHaveLength(count)
+      expect(layout.map((pos) => pos.spaces)).toEqual(
+        [...Array(count).keys()].map((idx) => [idx]),
+      )
+    },
+  )
+
+  it('balances five tiles as three across the first row and two across the second', () => {
+    expect(computeLiveTileLayout(5, 600, 400)).toEqual([
+      { x: 0, y: 0, width: 200, height: 200, spaces: [0] },
+      { x: 200, y: 0, width: 200, height: 200, spaces: [1] },
+      { x: 400, y: 0, width: 200, height: 200, spaces: [2] },
+      { x: 0, y: 200, width: 300, height: 200, spaces: [3] },
+      { x: 300, y: 200, width: 300, height: 200, spaces: [4] },
+    ])
+  })
+
+  it('absorbs fractional pixels without leaving right or bottom seams', () => {
+    const layout = computeLiveTileLayout(8, 1001, 701)
+    expect(Math.max(...layout.map((pos) => pos.x + pos.width))).toBe(1001)
+    expect(Math.max(...layout.map((pos) => pos.y + pos.height))).toBe(701)
+  })
+
+  it('clamps invalid and out-of-range counts', () => {
+    expect(clampLiveTileCount(Number.NaN)).toBe(1)
+    expect(clampLiveTileCount(0)).toBe(1)
+    expect(clampLiveTileCount(12)).toBe(9)
+  })
+})
 
 describe('idxToCoords', () => {
   it('maps an index to grid coordinates', () => {

@@ -1,6 +1,7 @@
 import { Low, Memory } from 'lowdb'
 import { JSONFilePreset } from 'lowdb/node'
 import { LayoutPreset, StreamDataContent } from 'streamwall-shared'
+import type { LiveWallStoredState } from './liveWallState'
 import log from './logger'
 
 export interface StreamwallStoredData {
@@ -8,6 +9,8 @@ export interface StreamwallStoredData {
   localStreamData: StreamDataContent[]
   layoutPresets: LayoutPreset[]
   favorites: string[]
+  /** Added by the self-contained wall; absent in pre-migration databases. */
+  liveWall?: LiveWallStoredState
 }
 
 const defaultData: StreamwallStoredData = {

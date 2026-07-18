@@ -283,6 +283,11 @@ export class StreamIDGenerator {
       if (streamId == null) {
         let counter = 0
         let newId
+        // Custom sources persist their deterministic ID in local storage. It
+        // must win over the historical order-dependent three-character ID so
+        // saved wall assignments continue resolving after restart/reordering.
+        const preferredId =
+          stream._dataSource === 'custom' && stream._id ? stream._id : null
         const idBase = source || label || link
         if (!idBase) {
           log.warn('skipping empty stream', stream)
@@ -295,7 +300,9 @@ export class StreamIDGenerator {
         do {
           const textPart = normalizedText.substr(0, 3).toLowerCase()
           const counterPart = counter === 0 && textPart ? '' : counter
-          newId = `${textPart}${counterPart}`
+          newId = preferredId
+            ? `${preferredId}${counter === 0 ? '' : `-${counter}`}`
+            : `${textPart}${counterPart}`
           counter++
         } while (idSet.has(newId))
 

@@ -6,6 +6,8 @@ import type { ControlCommand, WallAudioMode } from './schemas.ts'
 export interface StreamWindowConfig {
   cols: number
   rows: number
+  /** Exact number of edge-to-edge tiles in the self-contained live wall. */
+  tileCount?: number
   width: number
   height: number
   x?: number
@@ -85,11 +87,18 @@ export interface ViewState {
     // the mute/listening state: it is the level applied once the tile is
     // unmuted.
     volume: number
-    /** Wall-side audio override; absent snapshots are treated as `stage`. */
+    /** Whether this tile is explicitly muted or audible from the live wall. */
     wallAudioMode?: WallAudioMode
     /** Whether playback was paused from the wall-side hover controls. */
     isPaused?: boolean
   }
+}
+
+/** A lightweight Twitch channel match shown by the wall's stream picker. */
+export interface TwitchChannelSuggestion {
+  login: string
+  displayName: string
+  isLive: boolean
 }
 
 export interface StreamDelayStatus {

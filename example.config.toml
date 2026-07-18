@@ -30,7 +30,8 @@
 #active-color = "#fff"
 
 [grid]
-# Number of columns and rows in the stream grid (default: 3x3, each 1-16)
+# First-run tile count is cols × rows, clamped to 1-9. After the first launch,
+# the exact count selected from the wall's F1 menu is persisted separately.
 #cols = 3
 #rows = 3
 

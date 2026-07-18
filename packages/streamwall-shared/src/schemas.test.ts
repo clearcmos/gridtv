@@ -148,13 +148,24 @@ describe('localStreamDataSchema', () => {
 })
 
 describe('wallControlCommandSchema', () => {
-  test('accepts each wall media command', () => {
+  test('accepts each wall command', () => {
     for (const command of [
-      { type: 'set-wall-playback', viewId: 17, paused: true },
-      { type: 'set-wall-volume', viewId: 17, volume: 0.45 },
-      { type: 'set-wall-audio-mode', viewId: 17, mode: 'stage' },
-      { type: 'set-wall-audio-mode', viewId: 17, mode: 'muted' },
-      { type: 'set-wall-audio-mode', viewId: 17, mode: 'unmuted' },
+      { type: 'set-wall-playback', viewId: 17, viewIdx: 2, paused: true },
+      { type: 'set-wall-volume', viewId: 17, viewIdx: 2, volume: 0.45 },
+      {
+        type: 'set-wall-audio-mode',
+        viewId: 17,
+        viewIdx: 2,
+        mode: 'muted',
+      },
+      {
+        type: 'set-wall-audio-mode',
+        viewId: 17,
+        viewIdx: 2,
+        mode: 'unmuted',
+      },
+      { type: 'set-wall-tile-count', count: 7 },
+      { type: 'set-wall-stream', viewIdx: 2, username: 'lacy' },
     ]) {
       expect(wallControlCommandSchema.safeParse(command).success).toBe(true)
     }
@@ -162,10 +173,19 @@ describe('wallControlCommandSchema', () => {
 
   test('rejects malformed wall media commands', () => {
     for (const command of [
-      { type: 'set-wall-playback', viewId: -1, paused: true },
-      { type: 'set-wall-playback', viewId: 1, paused: 'yes' },
-      { type: 'set-wall-volume', viewId: 1, volume: 1.1 },
-      { type: 'set-wall-audio-mode', viewId: 1, mode: 'solo' },
+      { type: 'set-wall-playback', viewId: -1, viewIdx: 0, paused: true },
+      { type: 'set-wall-playback', viewId: 1, viewIdx: 0, paused: 'yes' },
+      { type: 'set-wall-volume', viewId: 1, viewIdx: 0, volume: 1.1 },
+      {
+        type: 'set-wall-audio-mode',
+        viewId: 1,
+        viewIdx: 0,
+        mode: 'stage',
+      },
+      { type: 'set-wall-audio-mode', viewId: 1, viewIdx: 0, mode: 'solo' },
+      { type: 'set-wall-tile-count', count: 0 },
+      { type: 'set-wall-tile-count', count: 10 },
+      { type: 'set-wall-stream', viewIdx: 9, username: 'lacy' },
       { type: 'unknown-wall-command', viewId: 1 },
     ]) {
       expect(wallControlCommandSchema.safeParse(command).success).toBe(false)
