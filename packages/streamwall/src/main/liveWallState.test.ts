@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   normalizeLiveWallState,
+  remapLiveWallTileSettings,
   resizeLiveWallState,
   swapLiveWallTileSettings,
   updateLiveWallTileSettings,
@@ -83,6 +84,34 @@ describe('live wall stored state', () => {
       audioMode: 'unmuted',
       volume: 0.35,
       paused: true,
+    })
+  })
+
+  it("copies one stream's settings across its stretched cells and follows displaced streams", () => {
+    const state = normalizeLiveWallState(undefined, 4)
+    updateLiveWallTileSettings(state, 0, {
+      audioMode: 'unmuted',
+      volume: 0.35,
+      paused: true,
+    })
+    updateLiveWallTileSettings(state, 1, { volume: 0.6 })
+
+    remapLiveWallTileSettings(
+      state,
+      ['a', 'b', 'c', undefined],
+      ['a', 'a', 'c', 'b'],
+    )
+
+    expect(state.tiles['0']).toEqual(state.tiles['1'])
+    expect(state.tiles['0']).toEqual({
+      audioMode: 'unmuted',
+      volume: 0.35,
+      paused: true,
+    })
+    expect(state.tiles['3']).toEqual({
+      audioMode: 'muted',
+      volume: 0.6,
+      paused: false,
     })
   })
 })

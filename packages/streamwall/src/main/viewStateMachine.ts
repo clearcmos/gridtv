@@ -158,6 +158,7 @@ const viewStateMachine = setup({
           pos: ViewPos
           content: ViewContent
         }
+      | { type: 'RESTORE' }
       | { type: 'VIEW_INIT' }
       | { type: 'VIEW_LOADED' }
       | { type: 'VIEW_STALLED' }
@@ -474,6 +475,11 @@ const viewStateMachine = setup({
       // New content starts with a clean slate: no prior reason, full retry budget.
       entry: ['offscreenView', 'resetRetryState'],
       on: {
+        // StreamWindow parks fullscreen-obscured actors on a hidden host while
+        // retaining their logical position. DISPLAY may therefore no-op when
+        // the wall collapses back to that same position; RESTORE is the
+        // explicit physical reattachment step.
+        RESTORE: { actions: 'positionView' },
         DISPLAY: {
           actions: assign({
             pos: ({ event }) => event.pos,

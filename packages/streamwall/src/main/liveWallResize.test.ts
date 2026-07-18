@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
-import { applyLiveTileCount, swapLiveWallAssignments } from './liveWallResize'
+import {
+  applyLiveTileCount,
+  resizeLiveWallAssignment,
+  swapLiveWallAssignments,
+} from './liveWallResize'
 
 function makeViews(assignments: Array<string | undefined>) {
   const doc = new Y.Doc()
@@ -78,5 +82,74 @@ describe('swapLiveWallAssignments', () => {
     expect(viewsState.get('0')?.get('streamId')).toBeUndefined()
     expect(viewsState.get('1')?.get('streamId')).toBe('a')
     expect(swapLiveWallAssignments(context, 1, 9)).toBe(false)
+  })
+
+  it('swaps whole stretched regions rather than splitting either stream', () => {
+    const { doc, viewsState } = makeViews(['a', 'a', 'b', undefined])
+
+    expect(
+      swapLiveWallAssignments(
+        { viewsState, transact: (fn) => doc.transact(fn) },
+        0,
+        2,
+      ),
+    ).toBe(true)
+    expect(
+      [...viewsState.values()].map((cell) => cell.get('streamId')),
+    ).toEqual(['b', 'b', 'a', undefined])
+  })
+})
+
+describe('resizeLiveWallAssignment', () => {
+  it('stretches a stream and moves an encroached stream to the nearest free cell', () => {
+    const { doc, viewsState } = makeViews(['a', 'b', 'c', undefined])
+
+    const result = resizeLiveWallAssignment(
+      { viewsState, transact: (fn) => doc.transact(fn) },
+      4,
+      0,
+      1,
+    )
+
+    expect(result).toEqual({
+      resized: true,
+      spaces: [0, 1],
+      movedStreamIds: ['b'],
+      discardedStreamIds: [],
+    })
+    expect(
+      [...viewsState.values()].map((cell) => cell.get('streamId')),
+    ).toEqual(['a', 'a', 'c', 'b'])
+  })
+
+  it('discards an encroached stream when the resized wall has no free cell', () => {
+    const { doc, viewsState } = makeViews(['a', 'b', 'c', 'd'])
+
+    const result = resizeLiveWallAssignment(
+      { viewsState, transact: (fn) => doc.transact(fn) },
+      4,
+      0,
+      1,
+    )
+
+    expect(result.discardedStreamIds).toEqual(['b'])
+    expect(
+      [...viewsState.values()].map((cell) => cell.get('streamId')),
+    ).toEqual(['a', 'a', 'c', 'd'])
+  })
+
+  it('can shrink a previously stretched stream back to its anchor cell', () => {
+    const { doc, viewsState } = makeViews(['a', 'a', 'c', 'd'])
+
+    resizeLiveWallAssignment(
+      { viewsState, transact: (fn) => doc.transact(fn) },
+      4,
+      0,
+      0,
+    )
+
+    expect(
+      [...viewsState.values()].map((cell) => cell.get('streamId')),
+    ).toEqual(['a', undefined, 'c', 'd'])
   })
 })

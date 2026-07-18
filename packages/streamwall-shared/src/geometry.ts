@@ -82,6 +82,132 @@ export function computeLiveTileLayout(
   return positions
 }
 
+/** Returns one bounding rectangle for a set of live-wall cells. */
+export function mergeLiveTilePositions(
+  positions: readonly ViewPos[],
+  spaces: readonly number[],
+): ViewPos | undefined {
+  const wanted = new Set(spaces)
+  const selected = positions.filter((pos) => wanted.has(pos.spaces[0]))
+  if (selected.length === 0) {
+    return undefined
+  }
+
+  const left = Math.min(...selected.map((pos) => pos.x))
+  const top = Math.min(...selected.map((pos) => pos.y))
+  const right = Math.max(...selected.map((pos) => pos.x + pos.width))
+  const bottom = Math.max(...selected.map((pos) => pos.y + pos.height))
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+    spaces: selected.map((pos) => pos.spaces[0]).sort((a, b) => a - b),
+  }
+}
+
+function rectanglesOverlap(left: Rectangle, right: Rectangle): boolean {
+  return (
+    left.x < right.x + right.width &&
+    left.x + left.width > right.x &&
+    left.y < right.y + right.height &&
+    left.y + left.height > right.y
+  )
+}
+
+/**
+ * Resolves a right-button stretch between two cells into a rectangular set of
+ * wall spaces. Non-square live layouts can have rows with different column
+ * counts, so the selection grows to include every cell touched by its bounding
+ * rectangle. That guarantees the resulting WebContentsView never overlaps a
+ * partially covered neighbour.
+ */
+export function computeLiveTileSpanSpaces(
+  requestedCount: number,
+  sourceSpace: number,
+  targetSpace: number,
+): number[] {
+  // Large, evenly-divisible dimensions keep this calculation independent of
+  // the current window's fractional-pixel rounding.
+  const positions = computeLiveTileLayout(requestedCount, 2520, 2520)
+  const source = positions.find((pos) => pos.spaces[0] === sourceSpace)
+  const target = positions.find((pos) => pos.spaces[0] === targetSpace)
+  if (!source || !target) {
+    return []
+  }
+
+  const selected = new Set<number>([sourceSpace, targetSpace])
+  let bounds = mergeLiveTilePositions(positions, [...selected])
+  if (!bounds) {
+    return []
+  }
+
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const pos of positions) {
+      const space = pos.spaces[0]
+      if (!selected.has(space) && rectanglesOverlap(pos, bounds)) {
+        selected.add(space)
+        changed = true
+      }
+    }
+    if (changed) {
+      bounds = mergeLiveTilePositions(positions, [...selected]) ?? bounds
+    }
+  }
+
+  return [...selected].sort((a, b) => a - b)
+}
+
+/**
+ * Groups repeated live-wall content into a single spanning rectangle. A
+ * stretched tile is persisted by assigning the same stream to each space it
+ * owns, so this is the shared geometry used by both Electron views and the
+ * interactive overlay.
+ */
+export function computeLiveTileContentLayout(
+  requestedCount: number,
+  width: number,
+  height: number,
+  viewContentMap: ViewContentMap,
+): Array<{ content: ViewContent; spaces: number[]; rect: Rectangle }> {
+  const positions = computeLiveTileLayout(requestedCount, width, height)
+  const groups: Array<{ content: ViewContent; spaces: number[] }> = []
+
+  for (const pos of positions) {
+    const space = pos.spaces[0]
+    const content = viewContentMap.get(String(space))
+    if (!content) {
+      continue
+    }
+    const existing = groups.find((group) => isEqual(group.content, content))
+    if (existing) {
+      existing.spaces.push(space)
+    } else {
+      groups.push({ content, spaces: [space] })
+    }
+  }
+
+  return groups.flatMap(({ content, spaces }) => {
+    const pos = mergeLiveTilePositions(positions, spaces)
+    return pos
+      ? [
+          {
+            content,
+            spaces: pos.spaces,
+            rect: {
+              x: pos.x,
+              y: pos.y,
+              width: pos.width,
+              height: pos.height,
+            },
+          },
+        ]
+      : []
+  })
+}
+
 export function boxesFromViewContentMap(
   cols: number,
   rows: number,

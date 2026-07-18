@@ -5,7 +5,9 @@ import {
   clampGridDimension,
   clampLiveTileCount,
   computeBoxRect,
+  computeLiveTileContentLayout,
   computeLiveTileLayout,
+  computeLiveTileSpanSpaces,
   fullscreenViewContentMap,
   GRID_MAX,
   GRID_MIN,
@@ -48,6 +50,46 @@ describe('computeLiveTileLayout', () => {
     expect(clampLiveTileCount(Number.NaN)).toBe(1)
     expect(clampLiveTileCount(0)).toBe(1)
     expect(clampLiveTileCount(12)).toBe(9)
+  })
+
+  it('turns a right-drag across a square wall into a rectangular span', () => {
+    expect(computeLiveTileSpanSpaces(4, 0, 1)).toEqual([0, 1])
+    expect(computeLiveTileSpanSpaces(4, 0, 3)).toEqual([0, 1, 2, 3])
+    expect(computeLiveTileSpanSpaces(4, 0, 0)).toEqual([0])
+  })
+
+  it('groups repeated content into one spanning live tile', () => {
+    const stretched: ViewContent = {
+      url: 'https://example.com/stretched',
+      kind: 'video',
+    }
+    const other: ViewContent = {
+      url: 'https://example.com/other',
+      kind: 'video',
+    }
+    const layout = computeLiveTileContentLayout(
+      4,
+      400,
+      200,
+      new Map([
+        ['0', stretched],
+        ['1', stretched],
+        ['2', other],
+      ]),
+    )
+
+    expect(layout).toEqual([
+      {
+        content: stretched,
+        spaces: [0, 1],
+        rect: { x: 0, y: 0, width: 400, height: 100 },
+      },
+      {
+        content: other,
+        spaces: [2],
+        rect: { x: 0, y: 100, width: 200, height: 100 },
+      },
+    ])
   })
 })
 

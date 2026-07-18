@@ -168,6 +168,7 @@ describe('wallControlCommandSchema', () => {
       { type: 'set-wall-stream', viewIdx: 2, username: 'lacy' },
       { type: 'set-wall-fullscreen', viewIdx: 2, fullscreen: true },
       { type: 'swap-wall-streams', fromViewIdx: 2, toViewIdx: 5 },
+      { type: 'resize-wall-tile', viewIdx: 2, targetViewIdx: 5 },
     ]) {
       expect(wallControlCommandSchema.safeParse(command).success).toBe(true)
     }
@@ -190,6 +191,7 @@ describe('wallControlCommandSchema', () => {
       { type: 'set-wall-stream', viewIdx: 9, username: 'lacy' },
       { type: 'set-wall-fullscreen', viewIdx: 9, fullscreen: true },
       { type: 'swap-wall-streams', fromViewIdx: -1, toViewIdx: 2 },
+      { type: 'resize-wall-tile', viewIdx: 2, targetViewIdx: 9 },
       { type: 'unknown-wall-command', viewId: 1 },
     ]) {
       expect(wallControlCommandSchema.safeParse(command).success).toBe(false)

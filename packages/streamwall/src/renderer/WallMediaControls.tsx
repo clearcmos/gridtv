@@ -85,7 +85,12 @@ export function WallMediaControls({
   const nextModeLabel = AUDIO_MODE_LABEL[nextWallAudioMode(audioMode)]
 
   return (
-    <ControlBar data-wall-media-controls data-testid="wall-media-controls">
+    <ControlBar
+      data-wall-media-controls
+      data-no-tile-drag
+      data-testid="wall-media-controls"
+      draggable={false}
+    >
       <ControlButton
         type="button"
         onClick={handlePlaybackClick}

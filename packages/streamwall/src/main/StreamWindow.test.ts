@@ -677,6 +677,58 @@ describe('StreamWindow.setViews expanding a view to fill the wall (issue #362)',
   })
 })
 
+describe('StreamWindow.setViews stretched live-wall tiles', () => {
+  it('renders repeated live assignments as one actor spanning their cells', () => {
+    const sw = makeStreamWindow(
+      makeConfig({
+        cols: 4,
+        rows: 1,
+        tileCount: 4,
+        width: 400,
+        height: 200,
+      }),
+    )
+    sw.win = {
+      contentView: { removeChildView: vi.fn() },
+    } as unknown as InstanceType<typeof StreamWindow>['win']
+    const streamA: ViewContent = {
+      url: 'https://example.com/a',
+      kind: 'video',
+    }
+    const existing = makeReuseTestActor({
+      id: 1,
+      content: streamA,
+      spaces: [0],
+      running: true,
+    })
+    sw.views = new Map([[1, existing.actor]])
+    sw.createView = vi.fn()
+
+    sw.setViews(
+      new Map([
+        ['0', streamA],
+        ['1', streamA],
+      ]),
+      { byURL: new Map([[streamA.url, {}]]) },
+    )
+
+    expect(sw.createView).not.toHaveBeenCalled()
+    expect(existing.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'DISPLAY',
+        pos: {
+          x: 0,
+          y: 0,
+          width: 400,
+          height: 100,
+          spaces: [0, 1],
+        },
+      }),
+    )
+    expect(sw.views.size).toBe(1)
+  })
+})
+
 describe('StreamWindow.setViews parking unused views during a fullscreen expansion (issue #369)', () => {
   it('hides a non-focused running view instead of tearing it down when parkUnused is requested', () => {
     const sw = makeStreamWindow(makeConfig({ cols: 2, rows: 2 }))
@@ -793,6 +845,7 @@ describe('StreamWindow.setViews parking unused views during a fullscreen expansi
     expect(other.send).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'DISPLAY', content: streamA }),
     )
+    expect(other.send).toHaveBeenCalledWith({ type: 'RESTORE' })
     expect(sw.views.size).toBe(2)
     expect(sw.views.get(2)).toBe(other.actor)
   })

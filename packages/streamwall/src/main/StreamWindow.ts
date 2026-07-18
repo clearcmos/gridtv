@@ -14,7 +14,7 @@ import path from 'path'
 import {
   boxesFromViewContentMap,
   computeBoxRect,
-  computeLiveTileLayout,
+  computeLiveTileContentLayout,
   ContentDisplayOptions,
   StreamData,
   StreamList,
@@ -554,18 +554,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
             spaces: box.spaces,
             rect: computeBoxRect(cols, rows, width, height, box),
           }))
-        : computeLiveTileLayout(tileCount, width, height)
-            .map((pos) => ({
-              content: viewContentMap.get(String(pos.spaces[0])),
-              spaces: pos.spaces,
-              rect: {
-                x: pos.x,
-                y: pos.y,
-                width: pos.width,
-                height: pos.height,
-              },
-            }))
-            .filter((box) => box.content !== undefined)
+        : computeLiveTileContentLayout(tileCount, width, height, viewContentMap)
     const remainingBoxes = new Set(boxes)
     // Views parked by a previous `parkUnused` call are reuse candidates too,
     // so a fullscreen collapse can find and reposition them via the matchers
@@ -661,6 +650,13 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       const pos = { ...box.rect, spaces }
 
       view.send({ type: 'DISPLAY', pos, content })
+      if (previouslyParkedIds.has(view.getSnapshot().context.id)) {
+        // A parked actor deliberately retains its last logical position. On
+        // collapse that position can be byte-for-byte identical, causing the
+        // running state's DISPLAY fast path to no-op. RESTORE explicitly moves
+        // its still-playing WebContentsView back from the hidden host.
+        view.send({ type: 'RESTORE' })
+      }
       view.send({ type: 'OPTIONS', options: getDisplayOptions(stream) })
       const viewId = view.getSnapshot().context.id
       if (this.pauseParkedViews && previouslyParkedIds.has(viewId)) {
@@ -788,6 +784,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       case 'set-wall-stream':
       case 'set-wall-fullscreen':
       case 'swap-wall-streams':
+      case 'resize-wall-tile':
         // Main owns the persisted layout/source data and handles these after
         // the validated command is emitted through StreamWindowEventMap.
         break

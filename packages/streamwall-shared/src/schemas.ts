@@ -122,6 +122,19 @@ export const wallControlCommandSchema = z.discriminatedUnion('type', [
       .min(0)
       .max(LIVE_TILE_MAX - 1),
   }),
+  z.object({
+    type: z.literal('resize-wall-tile'),
+    viewIdx: z
+      .number()
+      .int()
+      .min(0)
+      .max(LIVE_TILE_MAX - 1),
+    targetViewIdx: z
+      .number()
+      .int()
+      .min(0)
+      .max(LIVE_TILE_MAX - 1),
+  }),
 ])
 export type WallControlCommand = z.infer<typeof wallControlCommandSchema>
 

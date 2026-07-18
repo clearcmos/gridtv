@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { FaEdit, FaPlus, FaVideoSlash } from 'react-icons/fa'
 import {
   computeLiveTileLayout,
+  computeLiveTileSpanSpaces,
+  mergeLiveTilePositions,
   StreamwallState,
   twitchLoginFromInput,
   type LiveWallSlotState,
@@ -42,6 +44,7 @@ export function Overlay({
 }) {
   const { width, height, activeColor } = config
   const tileCount = config.tileCount ?? config.cols * config.rows
+  const baseLayout = computeLiveTileLayout(tileCount, width, height)
   const [isGridMenuOpen, setGridMenuOpen] = useState(false)
   const [pickerViewIdx, setPickerViewIdx] = useState<number | null>(null)
   const [dragSourceViewIdx, setDragSourceViewIdx] = useState<number | null>(
@@ -50,6 +53,22 @@ export function Overlay({
   const [dropTargetViewIdx, setDropTargetViewIdx] = useState<number | null>(
     null,
   )
+  const [resizeSourceViewIdx, setResizeSourceViewIdx] = useState<number | null>(
+    null,
+  )
+  const [resizeTargetViewIdx, setResizeTargetViewIdx] = useState<number | null>(
+    null,
+  )
+  const tileGesture = useRef<{
+    kind: 'swap' | 'resize'
+    pointerId: number
+    sourceViewIdx: number
+    startX: number
+    startY: number
+    moved: boolean
+    targetViewIdx: number | null
+  } | null>(null)
+  const suppressDoubleClickUntil = useRef(0)
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -109,6 +128,23 @@ export function Overlay({
     wallSlots.map((slot) => [slot.viewIdx, slot]),
   )
 
+  const baseSpaceAtPoint = (clientX: number, clientY: number) =>
+    baseLayout.find(
+      (pos) =>
+        clientX >= pos.x &&
+        clientX < pos.x + pos.width &&
+        clientY >= pos.y &&
+        clientY < pos.y + pos.height,
+    )?.spaces[0]
+
+  const clearTileGesture = () => {
+    tileGesture.current = null
+    setDragSourceViewIdx(null)
+    setDropTargetViewIdx(null)
+    setResizeSourceViewIdx(null)
+    setResizeTargetViewIdx(null)
+  }
+
   function renderTile(
     viewIdx: number,
     pos: ViewPos,
@@ -138,10 +174,50 @@ export function Overlay({
       : false
     const hasAssignment = Boolean(content || wallSlot?.streamId)
     const statusLabel = data?.label ?? data?.source ?? 'This channel'
+    const username =
+      twitchLoginFromInput(content?.url ?? data?.link ?? '') ?? statusLabel
 
     const interactiveTarget = (target: EventTarget | null) =>
       target instanceof Element &&
-      target.closest('button, input, [role="dialog"]') != null
+      target.closest('button, input, [role="dialog"], [data-no-tile-drag]') !=
+        null
+
+    const handlePointerFinish = (event: PointerEvent) => {
+      const gesture = tileGesture.current
+      if (!gesture || gesture.pointerId !== event.pointerId) {
+        return
+      }
+      if (gesture.moved) {
+        suppressDoubleClickUntil.current = Date.now() + 400
+        if (
+          gesture.kind === 'swap' &&
+          gesture.targetViewIdx != null &&
+          gesture.targetViewIdx !== gesture.sourceViewIdx
+        ) {
+          onControl({
+            type: 'swap-wall-streams',
+            fromViewIdx: gesture.sourceViewIdx,
+            toViewIdx: gesture.targetViewIdx,
+          })
+        } else if (gesture.kind === 'resize' && gesture.targetViewIdx != null) {
+          onControl({
+            type: 'resize-wall-tile',
+            viewIdx: gesture.sourceViewIdx,
+            targetViewIdx: gesture.targetViewIdx,
+          })
+        }
+      }
+      if (event.currentTarget instanceof Element) {
+        const target = event.currentTarget as HTMLElement
+        if (
+          !target.hasPointerCapture ||
+          target.hasPointerCapture(event.pointerId)
+        ) {
+          target.releasePointerCapture?.(event.pointerId)
+        }
+      }
+      clearTileGesture()
+    }
 
     return (
       <SpaceBorder
@@ -156,14 +232,19 @@ export function Overlay({
         $isError={isError}
         $isDragging={dragSourceViewIdx === viewIdx}
         $isDropTarget={dropTargetViewIdx === viewIdx}
-        draggable={fullscreenViewIdx == null}
+        $isResizing={resizeSourceViewIdx === viewIdx}
         title={
           view
-            ? 'Double-click to expand; drag to another tile to swap'
-            : 'Drag to another tile to swap'
+            ? 'Double-click to expand; left-drag to swap; right-drag to resize'
+            : 'Left-drag to swap'
         }
         onDblClick={(event) => {
-          if (!view || !content || interactiveTarget(event.target)) {
+          if (
+            Date.now() < suppressDoubleClickUntil.current ||
+            !view ||
+            !content ||
+            interactiveTarget(event.target)
+          ) {
             return
           }
           onControl({
@@ -172,60 +253,62 @@ export function Overlay({
             fullscreen: fullscreenViewIdx == null,
           })
         }}
-        onDragStart={(event) => {
+        onPointerDown={(event) => {
           if (
             fullscreenViewIdx != null ||
             interactiveTarget(event.target) ||
-            !event.dataTransfer
+            (event.button !== 0 && event.button !== 2) ||
+            (event.button === 2 && !hasAssignment)
           ) {
-            event.preventDefault()
             return
           }
-          event.dataTransfer.effectAllowed = 'move'
-          event.dataTransfer.setData('text/plain', String(viewIdx))
-          setDragSourceViewIdx(viewIdx)
-          setDropTargetViewIdx(null)
-        }}
-        onDragEnter={(event) => {
-          if (dragSourceViewIdx != null && dragSourceViewIdx !== viewIdx) {
+          if (event.button === 2) {
             event.preventDefault()
-            setDropTargetViewIdx(viewIdx)
           }
+          tileGesture.current = {
+            kind: event.button === 2 ? 'resize' : 'swap',
+            pointerId: event.pointerId,
+            sourceViewIdx: viewIdx,
+            startX: event.clientX,
+            startY: event.clientY,
+            moved: false,
+            targetViewIdx: null,
+          }
+          ;(event.currentTarget as HTMLElement).setPointerCapture?.(
+            event.pointerId,
+          )
         }}
-        onDragOver={(event) => {
-          if (dragSourceViewIdx != null && dragSourceViewIdx !== viewIdx) {
+        onPointerMove={(event) => {
+          const gesture = tileGesture.current
+          if (!gesture || gesture.pointerId !== event.pointerId) {
+            return
+          }
+          if (
+            !gesture.moved &&
+            Math.hypot(
+              event.clientX - gesture.startX,
+              event.clientY - gesture.startY,
+            ) < 6
+          ) {
+            return
+          }
+          gesture.moved = true
+          const targetViewIdx = baseSpaceAtPoint(event.clientX, event.clientY)
+          gesture.targetViewIdx = targetViewIdx ?? null
+          if (gesture.kind === 'swap') {
+            setDragSourceViewIdx(gesture.sourceViewIdx)
+            setDropTargetViewIdx(targetViewIdx ?? null)
+          } else {
+            setResizeSourceViewIdx(gesture.sourceViewIdx)
+            setResizeTargetViewIdx(targetViewIdx ?? null)
+          }
+          if (event.cancelable) {
             event.preventDefault()
-            if (event.dataTransfer) {
-              event.dataTransfer.dropEffect = 'move'
-            }
           }
         }}
-        onDrop={(event) => {
-          event.preventDefault()
-          const transferredText =
-            event.dataTransfer?.getData('text/plain') ?? ''
-          const transferred = /^\d+$/.test(transferredText)
-            ? Number(transferredText)
-            : null
-          const fromViewIdx =
-            dragSourceViewIdx ??
-            (transferred != null && Number.isInteger(transferred)
-              ? transferred
-              : null)
-          if (fromViewIdx != null && fromViewIdx !== viewIdx) {
-            onControl({
-              type: 'swap-wall-streams',
-              fromViewIdx,
-              toViewIdx: viewIdx,
-            })
-          }
-          setDragSourceViewIdx(null)
-          setDropTargetViewIdx(null)
-        }}
-        onDragEnd={() => {
-          setDragSourceViewIdx(null)
-          setDropTargetViewIdx(null)
-        }}
+        onPointerUp={handlePointerFinish}
+        onPointerCancel={clearTileGesture}
+        onContextMenu={(event) => event.preventDefault()}
       >
         {content && (
           <OverlayViewTile
@@ -264,6 +347,9 @@ export function Overlay({
             <span>Empty tile {viewIdx + 1}</span>
           </EmptyTile>
         )}
+        {hasAssignment && (
+          <UsernameBadge data-wall-username>{username}</UsernameBadge>
+        )}
         {view && context && (
           <WallMediaControls
             viewId={context.id}
@@ -280,6 +366,7 @@ export function Overlay({
           aria-label={`Choose stream for tile ${viewIdx + 1}`}
           title={`Choose stream for tile ${viewIdx + 1}`}
           $empty={!hasAssignment}
+          data-no-tile-drag
           draggable={false}
           onClick={() => {
             setGridMenuOpen(false)
@@ -292,25 +379,79 @@ export function Overlay({
     )
   }
 
-  const normalTiles = computeLiveTileLayout(tileCount, width, height).map(
-    (pos) => {
-      const viewIdx = pos.spaces[0]
-      return renderTile(
-        viewIdx,
-        pos,
-        viewsBySpace.get(viewIdx),
-        wallSlotsBySpace.get(viewIdx),
-      )
-    },
-  )
-  const fullscreenTiles = activeViews.flatMap((view) => {
-    const { pos } = view.context
-    if (!pos) {
-      return []
+  const normalTiles = []
+  const renderedViewIds = new Set<number>()
+  const renderedStreamIds = new Set<string>()
+  for (const basePos of baseLayout) {
+    const baseViewIdx = basePos.spaces[0]
+    const view = viewsBySpace.get(baseViewIdx)
+    if (view && view.context.pos && !renderedViewIds.has(view.context.id)) {
+      renderedViewIds.add(view.context.id)
+      const viewIdx = Math.min(...view.context.pos.spaces)
+      const slot =
+        wallSlotsBySpace.get(viewIdx) ?? wallSlotsBySpace.get(baseViewIdx)
+      if (slot?.streamId) {
+        renderedStreamIds.add(slot.streamId)
+      }
+      normalTiles.push(renderTile(viewIdx, view.context.pos, view, slot))
+      continue
     }
-    const viewIdx = fullscreenViewIdx ?? pos.spaces[0] ?? 0
-    return [renderTile(viewIdx, pos, view, wallSlotsBySpace.get(viewIdx))]
-  })
+    if (view) {
+      continue
+    }
+
+    const slot = wallSlotsBySpace.get(baseViewIdx)
+    if (slot?.streamId) {
+      if (renderedStreamIds.has(slot.streamId)) {
+        continue
+      }
+      renderedStreamIds.add(slot.streamId)
+      const spaces = wallSlots
+        .filter((candidate) => candidate.streamId === slot.streamId)
+        .map((candidate) => candidate.viewIdx)
+      const pos = mergeLiveTilePositions(baseLayout, spaces) ?? basePos
+      const viewIdx = Math.min(...pos.spaces)
+      normalTiles.push(
+        renderTile(viewIdx, pos, undefined, wallSlotsBySpace.get(viewIdx)),
+      )
+      continue
+    }
+
+    normalTiles.push(renderTile(baseViewIdx, basePos))
+  }
+
+  const fullscreenView =
+    fullscreenViewIdx == null ? undefined : viewsBySpace.get(fullscreenViewIdx)
+  const fullscreenTiles =
+    fullscreenViewIdx != null && fullscreenView
+      ? [
+          renderTile(
+            fullscreenViewIdx,
+            {
+              x: 0,
+              y: 0,
+              width,
+              height,
+              spaces: [fullscreenViewIdx],
+            },
+            fullscreenView,
+            wallSlotsBySpace.get(fullscreenViewIdx),
+          ),
+        ]
+      : []
+
+  const resizePreviewSpaces =
+    resizeSourceViewIdx != null && resizeTargetViewIdx != null
+      ? computeLiveTileSpanSpaces(
+          tileCount,
+          resizeSourceViewIdx,
+          resizeTargetViewIdx,
+        )
+      : []
+  const resizePreviewPos = mergeLiveTilePositions(
+    baseLayout,
+    resizePreviewSpaces,
+  )
 
   const pickerView =
     pickerViewIdx == null ? undefined : viewsBySpace.get(pickerViewIdx)
@@ -329,6 +470,9 @@ export function Overlay({
     <OverlayContainer>
       <VersionFooter />
       {fullscreenViewIdx == null ? normalTiles : fullscreenTiles}
+      {fullscreenViewIdx == null && resizePreviewPos && (
+        <ResizePreview data-wall-resize-preview $pos={resizePreviewPos} />
+      )}
       {overlays.map((s) => (
         <OverlayIFrame
           key={s._id}
@@ -404,6 +548,7 @@ const SpaceBorder = styled.div.attrs<{
   $isError?: boolean
   $isDragging: boolean
   $isDropTarget: boolean
+  $isResizing: boolean
   $borderWidth?: number
 }>(() => ({
   $borderWidth: 2,
@@ -435,24 +580,68 @@ const SpaceBorder = styled.div.attrs<{
   container-type: size;
   pointer-events: auto;
   user-select: none;
-  cursor: ${({ $isDragging }) => ($isDragging ? 'grabbing' : 'grab')};
+  touch-action: none;
+  cursor: ${({ $isDragging, $isResizing }) =>
+    $isResizing ? 'nwse-resize' : $isDragging ? 'grabbing' : 'grab'};
   opacity: ${({ $isDragging }) => ($isDragging ? 0.62 : 1)};
   transition:
     box-shadow 100ms ease-out,
     opacity 100ms ease-out;
 
-  &:hover [data-wall-media-controls],
-  &:focus-within [data-wall-media-controls] {
+  &:hover [data-wall-media-controls] {
     opacity: 1;
     pointer-events: auto;
     transform: translate(-50%, 0);
   }
 
-  &:hover [data-wall-tile-picker],
-  &:focus-within [data-wall-tile-picker] {
+  &:hover [data-wall-tile-picker] {
     opacity: 1;
     pointer-events: auto;
   }
+
+  &:hover [data-wall-username] {
+    opacity: 1;
+  }
+`
+
+const UsernameBadge = styled.div`
+  position: absolute;
+  top: clamp(5px, 3cqh, 12px);
+  left: 50%;
+  z-index: 110;
+  max-width: 70%;
+  box-sizing: border-box;
+  padding: clamp(4px, 1.8cqh, 8px) clamp(8px, 3cqw, 14px);
+  overflow: hidden;
+  color: white;
+  font-size: clamp(10px, 5cqh, 16px);
+  font-weight: 750;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(8, 10, 14, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: clamp(5px, 2cqh, 9px);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity 120ms ease-out;
+`
+
+const ResizePreview = styled.div<{ $pos: ViewPos }>`
+  position: fixed;
+  left: ${({ $pos }) => $pos.x}px;
+  top: ${({ $pos }) => $pos.y}px;
+  z-index: 160;
+  width: ${({ $pos }) => $pos.width}px;
+  height: ${({ $pos }) => $pos.height}px;
+  box-sizing: border-box;
+  background: rgba(139, 92, 246, 0.12);
+  border: 4px solid rgba(196, 181, 253, 0.96);
+  box-shadow: 0 0 22px rgba(139, 92, 246, 0.65) inset;
+  pointer-events: none;
 `
 
 const EmptyTile = styled.div`

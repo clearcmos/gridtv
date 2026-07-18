@@ -687,6 +687,22 @@ describe('viewStateMachine content swap while running (seamless preload)', () =>
     expect(createNextView).not.toHaveBeenCalled()
   })
 
+  it('explicitly restores a parked view even when its logical position is unchanged', async () => {
+    const { actor, positionView, createNextView } =
+      makeActorWithSwapSpies(makeRetry())
+    actor.start()
+    await reachRunning(actor)
+    positionView.mockClear()
+
+    actor.send({ type: 'RESTORE' })
+
+    expect(matchesState('displaying.running', actor.getSnapshot().value)).toBe(
+      true,
+    )
+    expect(positionView).toHaveBeenCalledTimes(1)
+    expect(createNextView).not.toHaveBeenCalled()
+  })
+
   it('repositions the current view for a position-only change while running', async () => {
     const { actor, positionView, createNextView } =
       makeActorWithSwapSpies(makeRetry())

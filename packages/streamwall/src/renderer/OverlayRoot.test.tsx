@@ -332,31 +332,136 @@ describe('self-contained wall controls', () => {
         container!,
       )
     })
-    const dataTransfer = new DataTransfer()
-    const dispatchDrag = (element: Element, type: string) => {
-      const event = new DragEvent(type, {
-        bubbles: true,
-        cancelable: true,
-      })
-      // happy-dom exposes DataTransfer but does not currently copy it from
-      // DragEventInit, so attach the same browser property explicitly.
-      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
-      element.dispatchEvent(event)
+    const dispatchPointer = (
+      element: Element,
+      type: string,
+      clientX: number,
+      clientY: number,
+      button = 0,
+    ) => {
+      element.dispatchEvent(
+        new PointerEvent(type, {
+          pointerId: 1,
+          button,
+          clientX,
+          clientY,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
     }
     const source = container.querySelector('[data-view-idx="0"]')!
-    const target = container.querySelector('[data-view-idx="1"]')!
 
-    // happy-dom omits native `ondrag*` properties, so Preact retains JSX's
-    // event casing when it installs these listeners in this test environment.
-    act(() => dispatchDrag(source, 'DragStart'))
-    expect(dataTransfer.getData('text/plain')).toBe('0')
-    act(() => dispatchDrag(target, 'DragEnter'))
-    act(() => dispatchDrag(target, 'Drop'))
+    act(() => dispatchPointer(source, 'pointerdown', 25, 50))
+    act(() => dispatchPointer(source, 'pointermove', 175, 50))
+    act(() => dispatchPointer(source, 'pointerup', 175, 50))
 
     expect(onControl).toHaveBeenCalledWith({
       type: 'swap-wall-streams',
       fromViewIdx: 0,
       toViewIdx: 1,
     })
+  })
+
+  test('right-dragging a stream requests a persisted tile resize', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(4)}
+          views={[makeView(0, 'view-0')]}
+          streams={[makeStream('view-0')]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    const source = container.querySelector('[data-view-idx="0"]')!
+    const dispatchPointer = (
+      type: string,
+      clientX: number,
+      clientY: number,
+    ) => {
+      source.dispatchEvent(
+        new PointerEvent(type, {
+          pointerId: 2,
+          button: 2,
+          clientX,
+          clientY,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    }
+
+    act(() => dispatchPointer('pointerdown', 25, 25))
+    act(() => dispatchPointer('pointermove', 350, 75))
+    expect(container.querySelector('[data-wall-resize-preview]')).not.toBeNull()
+    act(() => dispatchPointer('pointerup', 350, 75))
+
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'resize-wall-tile',
+      viewIdx: 0,
+      targetViewIdx: 3,
+    })
+  })
+
+  test('volume-slider gestures never begin a tile drag', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(2)}
+          views={[makeView(0, 'view-0'), makeView(1, 'view-1')]}
+          streams={[makeStream('view-0'), makeStream('view-1')]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    const slider = container.querySelector('[aria-label="Stream volume"]')!
+    for (const [type, clientX] of [
+      ['pointerdown', 25],
+      ['pointermove', 175],
+      ['pointerup', 175],
+    ] as const) {
+      act(() => {
+        slider.dispatchEvent(
+          new PointerEvent(type, {
+            pointerId: 3,
+            button: 0,
+            clientX,
+            clientY: 50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        )
+      })
+    }
+
+    expect(onControl).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'swap-wall-streams' }),
+    )
+  })
+
+  test('renders the hovered-tile username overlay from the stream URL', () => {
+    const twitchStream: StreamData = {
+      ...makeStream('payo'),
+      link: 'https://www.twitch.tv/payo',
+      label: 'Payo Display Name',
+    }
+    const view = makeView(0, 'payo')
+    view.context.content = { url: twitchStream.link, kind: 'video' }
+    const root = renderOverlay([view], [twitchStream])
+
+    const badge = root.querySelector('[data-wall-username]')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toBe('payo')
   })
 })

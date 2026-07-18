@@ -70,11 +70,14 @@ import {
   canLoadLiveWallStream,
   twitchStatusForStream,
 } from './liveWallAvailability'
-import { applyLiveTileCount, swapLiveWallAssignments } from './liveWallResize'
+import {
+  applyLiveTileCount,
+  resizeLiveWallAssignment,
+  swapLiveWallAssignments,
+} from './liveWallResize'
 import {
   normalizeLiveWallState,
-  resizeLiveWallState,
-  swapLiveWallTileSettings,
+  remapLiveWallTileSettings,
   updateLiveWallTileSettings,
 } from './liveWallState'
 import { devServerOrigin } from './loadHTML'
@@ -805,12 +808,19 @@ async function main(argv: ReturnType<typeof parseArgs>) {
 
   function setLiveTileCount(count: number) {
     clientState = { ...clientState, fullscreenViewIdx: null }
-    applyLiveTileCount(
+    const previousAssignments = Array.from(
+      { length: liveWallState.tileCount },
+      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+    )
+    const result = applyLiveTileCount(
       {
         viewsState,
         transact: (fn) => stateDoc.transact(fn),
         setTileCount: (nextCount) => {
-          resizeLiveWallState(liveWallState, nextCount)
+          // Publish the new count before the Yjs transaction notifies its
+          // synchronous observers. Keep the old settings entries intact until
+          // remapLiveWallTileSettings below has attached them to retained IDs.
+          liveWallState.tileCount = nextCount
           streamWindow.setTileCount(nextCount)
         },
         knownStreamIds: new Set([
@@ -822,7 +832,16 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       },
       count,
     )
+    const nextAssignments = Array.from({ length: result.count }, (_, idx) =>
+      viewsState.get(String(idx))?.get('streamId'),
+    )
+    remapLiveWallTileSettings(
+      liveWallState,
+      previousAssignments,
+      nextAssignments,
+    )
     persistLiveWall()
+    updateViewsFromStateDoc()
     updateState({})
   }
 
@@ -834,8 +853,34 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     if (!cell) {
       return
     }
+    const previousAssignments = Array.from(
+      { length: liveWallState.tileCount },
+      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+    )
+    const replacedStreamId = cell.get('streamId')
+    const replacedSpaces = replacedStreamId
+      ? previousAssignments.flatMap((streamId, idx) =>
+          streamId === replacedStreamId ? [idx] : [],
+        )
+      : [viewIdx]
+
     if (!input.trim()) {
-      stateDoc.transact(() => cell.set('streamId', undefined))
+      stateDoc.transact(() => {
+        for (const idx of replacedSpaces) {
+          viewsState.get(String(idx))?.set('streamId', undefined)
+        }
+      })
+      const nextAssignments = Array.from(
+        { length: liveWallState.tileCount },
+        (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+      )
+      remapLiveWallTileSettings(
+        liveWallState,
+        previousAssignments,
+        nextAssignments,
+      )
+      persistLiveWall()
+      updateViewsFromStateDoc()
       return
     }
 
@@ -860,7 +905,31 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         _id: streamId,
       })
     }
-    stateDoc.transact(() => cell.set('streamId', streamId))
+    stateDoc.transact(() => {
+      // A stream can own multiple cells only as one contiguous stretched tile.
+      // Clear any former occurrence before assigning it to the region being
+      // replaced, so typing the same username elsewhere moves rather than
+      // accidentally creating an overlapping/non-contiguous span.
+      for (let idx = 0; idx < liveWallState.tileCount; idx++) {
+        if (viewsState.get(String(idx))?.get('streamId') === streamId) {
+          viewsState.get(String(idx))?.set('streamId', undefined)
+        }
+      }
+      for (const idx of replacedSpaces) {
+        viewsState.get(String(idx))?.set('streamId', streamId)
+      }
+    })
+    const nextAssignments = Array.from(
+      { length: liveWallState.tileCount },
+      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+    )
+    remapLiveWallTileSettings(
+      liveWallState,
+      previousAssignments,
+      nextAssignments,
+    )
+    persistLiveWall()
+    updateViewsFromStateDoc()
     void refreshTwitchStatuses([login])
   }
 
@@ -892,9 +961,10 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       return
     }
     clientState = { ...clientState, fullscreenViewIdx: null }
-    // This runs before the Yjs observer lays out the swapped players, so the
-    // actor arriving in each cell immediately receives its own prior settings.
-    swapLiveWallTileSettings(liveWallState, fromViewIdx, toViewIdx)
+    const previousAssignments = Array.from(
+      { length: liveWallState.tileCount },
+      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+    )
     if (
       !swapLiveWallAssignments(
         { viewsState, transact: (fn) => stateDoc.transact(fn) },
@@ -904,26 +974,87 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     ) {
       return
     }
+    const nextAssignments = Array.from(
+      { length: liveWallState.tileCount },
+      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+    )
+    remapLiveWallTileSettings(
+      liveWallState,
+      previousAssignments,
+      nextAssignments,
+    )
     persistLiveWall()
+    updateViewsFromStateDoc()
     updateState({})
   }
 
+  function resizeLiveWallTile(viewIdx: number, targetViewIdx: number) {
+    const previousAssignments = Array.from(
+      { length: liveWallState.tileCount },
+      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+    )
+    const result = resizeLiveWallAssignment(
+      { viewsState, transact: (fn) => stateDoc.transact(fn) },
+      liveWallState.tileCount,
+      viewIdx,
+      targetViewIdx,
+    )
+    if (!result.resized) {
+      return
+    }
+    clientState = { ...clientState, fullscreenViewIdx: null }
+    const nextAssignments = Array.from(
+      { length: liveWallState.tileCount },
+      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+    )
+    remapLiveWallTileSettings(
+      liveWallState,
+      previousAssignments,
+      nextAssignments,
+    )
+    persistLiveWall()
+    updateViewsFromStateDoc()
+    updateState({})
+    if (result.discardedStreamIds.length > 0) {
+      log.info(
+        'Discarded streams that no longer fit after tile resize:',
+        result.discardedStreamIds,
+      )
+    }
+  }
+
   function persistWallMediaCommand(command: WallControlCommand) {
+    const updateRegionSettings = (
+      viewIdx: number,
+      patch: Parameters<typeof updateLiveWallTileSettings>[2],
+    ) => {
+      const streamId = viewsState.get(String(viewIdx))?.get('streamId')
+      for (let idx = 0; idx < liveWallState.tileCount; idx++) {
+        if (
+          idx === viewIdx ||
+          (streamId != null &&
+            viewsState.get(String(idx))?.get('streamId') === streamId)
+        ) {
+          updateLiveWallTileSettings(liveWallState, idx, patch)
+        }
+      }
+    }
+
     switch (command.type) {
       case 'set-wall-playback':
-        updateLiveWallTileSettings(liveWallState, command.viewIdx, {
+        updateRegionSettings(command.viewIdx, {
           paused: command.paused,
         })
         persistLiveWall()
         break
       case 'set-wall-volume':
-        updateLiveWallTileSettings(liveWallState, command.viewIdx, {
+        updateRegionSettings(command.viewIdx, {
           volume: command.volume,
         })
         persistLiveWall()
         break
       case 'set-wall-audio-mode':
-        updateLiveWallTileSettings(liveWallState, command.viewIdx, {
+        updateRegionSettings(command.viewIdx, {
           audioMode: command.mode,
         })
         persistLiveWall()
@@ -939,6 +1070,9 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         break
       case 'swap-wall-streams':
         swapLiveWallStreams(command.fromViewIdx, command.toViewIdx)
+        break
+      case 'resize-wall-tile':
+        resizeLiveWallTile(command.viewIdx, command.targetViewIdx)
         break
     }
   }

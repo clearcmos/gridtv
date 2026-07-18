@@ -116,3 +116,35 @@ export function swapLiveWallTileSettings(
   state.tiles[fromKey] = { ...to }
   state.tiles[toKey] = { ...from }
 }
+
+/**
+ * Keeps media choices attached to stream IDs after a multi-cell resize/move.
+ * Empty cells return to defaults and every cell owned by one stretched stream
+ * receives the same settings, so applying settings by space is deterministic.
+ */
+export function remapLiveWallTileSettings(
+  state: LiveWallStoredState,
+  previousAssignments: readonly (string | undefined)[],
+  nextAssignments: readonly (string | undefined)[],
+): void {
+  const settingsByStreamId = new Map<string, LiveWallTileSettings>()
+  for (let idx = 0; idx < previousAssignments.length; idx++) {
+    const streamId = previousAssignments[idx]
+    if (streamId && !settingsByStreamId.has(streamId)) {
+      settingsByStreamId.set(streamId, {
+        ...(state.tiles[String(idx)] ?? DEFAULT_LIVE_WALL_TILE_SETTINGS),
+      })
+    }
+  }
+
+  const nextTiles: Record<string, LiveWallTileSettings> = {}
+  for (let idx = 0; idx < state.tileCount; idx++) {
+    const streamId = nextAssignments[idx]
+    nextTiles[String(idx)] = {
+      ...(streamId
+        ? (settingsByStreamId.get(streamId) ?? DEFAULT_LIVE_WALL_TILE_SETTINGS)
+        : DEFAULT_LIVE_WALL_TILE_SETTINGS),
+    }
+  }
+  state.tiles = nextTiles
+}
