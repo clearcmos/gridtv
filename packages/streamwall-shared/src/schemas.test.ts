@@ -164,6 +164,8 @@ describe('wallControlCommandSchema', () => {
         viewIdx: 2,
         mode: 'unmuted',
       },
+      { type: 'set-wall-fit-mode', viewId: 17, viewIdx: 2, mode: 'fit' },
+      { type: 'set-wall-fit-mode', viewId: 17, viewIdx: 2, mode: 'fill' },
       { type: 'set-wall-tile-count', count: 7 },
       { type: 'set-wall-stream', viewIdx: 2, username: 'lacy' },
       { type: 'set-wall-fullscreen', viewIdx: 2, fullscreen: true },
@@ -186,6 +188,7 @@ describe('wallControlCommandSchema', () => {
         mode: 'stage',
       },
       { type: 'set-wall-audio-mode', viewId: 1, viewIdx: 0, mode: 'solo' },
+      { type: 'set-wall-fit-mode', viewId: 1, viewIdx: 0, mode: 'stretch' },
       { type: 'set-wall-tile-count', count: 0 },
       { type: 'set-wall-tile-count', count: 10 },
       { type: 'set-wall-stream', viewIdx: 9, username: 'lacy' },
@@ -678,6 +681,7 @@ describe('streamwallStateSchema', () => {
             volume: 0.5,
             wallAudioMode: 'unmuted',
             isPaused: true,
+            wallFitMode: 'fill',
           },
         },
       ],
@@ -706,6 +710,7 @@ describe('streamwallStateSchema', () => {
     if (result.success) {
       expect(result.data.views[1].context.wallAudioMode).toBe('unmuted')
       expect(result.data.views[1].context.isPaused).toBe(true)
+      expect(result.data.views[1].context.wallFitMode).toBe('fill')
     }
   })
 

@@ -12,10 +12,10 @@ describe('live wall stored state', () => {
     expect(normalizeLiveWallState(undefined, 4)).toEqual({
       tileCount: 4,
       tiles: {
-        '0': { audioMode: 'muted', volume: 1, paused: false },
-        '1': { audioMode: 'muted', volume: 1, paused: false },
-        '2': { audioMode: 'muted', volume: 1, paused: false },
-        '3': { audioMode: 'muted', volume: 1, paused: false },
+        '0': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
+        '1': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
+        '2': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
+        '3': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
       },
     })
   })
@@ -26,7 +26,12 @@ describe('live wall stored state', () => {
         {
           tileCount: 2,
           tiles: {
-            '0': { audioMode: 'unmuted', volume: 2, paused: true },
+            '0': {
+              audioMode: 'unmuted',
+              volume: 2,
+              paused: true,
+              fitMode: 'fill',
+            },
             '1': { audioMode: 'stage', volume: 'loud', paused: false },
             '2': { audioMode: 'unmuted', volume: 0.5, paused: true },
           },
@@ -36,8 +41,13 @@ describe('live wall stored state', () => {
     ).toEqual({
       tileCount: 2,
       tiles: {
-        '0': { audioMode: 'unmuted', volume: 1, paused: true },
-        '1': { audioMode: 'muted', volume: 1, paused: false },
+        '0': {
+          audioMode: 'unmuted',
+          volume: 1,
+          paused: true,
+          fitMode: 'fill',
+        },
+        '1': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
       },
     })
   })
@@ -53,11 +63,13 @@ describe('live wall stored state', () => {
       audioMode: 'unmuted',
       volume: 0.4,
       paused: false,
+      fitMode: 'fit',
     })
     expect(state.tiles['3']).toEqual({
       audioMode: 'muted',
       volume: 1,
       paused: false,
+      fitMode: 'fit',
     })
 
     resizeLiveWallState(state, 1)
@@ -71,6 +83,7 @@ describe('live wall stored state', () => {
       audioMode: 'unmuted',
       volume: 0.35,
       paused: true,
+      fitMode: 'fill',
     })
 
     swapLiveWallTileSettings(state, 0, 1)
@@ -79,11 +92,13 @@ describe('live wall stored state', () => {
       audioMode: 'muted',
       volume: 1,
       paused: false,
+      fitMode: 'fit',
     })
     expect(state.tiles['1']).toEqual({
       audioMode: 'unmuted',
       volume: 0.35,
       paused: true,
+      fitMode: 'fill',
     })
   })
 
@@ -93,6 +108,7 @@ describe('live wall stored state', () => {
       audioMode: 'unmuted',
       volume: 0.35,
       paused: true,
+      fitMode: 'fill',
     })
     updateLiveWallTileSettings(state, 1, { volume: 0.6 })
 
@@ -107,11 +123,13 @@ describe('live wall stored state', () => {
       audioMode: 'unmuted',
       volume: 0.35,
       paused: true,
+      fitMode: 'fill',
     })
     expect(state.tiles['3']).toEqual({
       audioMode: 'muted',
       volume: 0.6,
       paused: false,
+      fitMode: 'fit',
     })
   })
 })

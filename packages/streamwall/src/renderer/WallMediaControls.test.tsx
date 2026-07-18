@@ -3,7 +3,11 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import type { WallControlCommand } from 'streamwall-shared'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { nextWallAudioMode, WallMediaControls } from './WallMediaControls'
+import {
+  nextWallAudioMode,
+  nextWallFitMode,
+  WallMediaControls,
+} from './WallMediaControls'
 
 let container: HTMLDivElement | undefined
 
@@ -19,6 +23,7 @@ function renderControls({
   isPaused = false,
   volume = 0.8,
   audioMode = 'muted' as const,
+  fitMode = 'fit' as const,
   onControl = vi.fn<(command: WallControlCommand) => void>(),
 } = {}) {
   container = document.createElement('div')
@@ -31,6 +36,7 @@ function renderControls({
         isPaused={isPaused}
         volume={volume}
         audioMode={audioMode}
+        fitMode={fitMode}
         onControl={onControl}
       />,
       container!,
@@ -107,5 +113,20 @@ describe('WallMediaControls', () => {
   test('toggles between exactly two audio modes', () => {
     expect(nextWallAudioMode('muted')).toBe('unmuted')
     expect(nextWallAudioMode('unmuted')).toBe('muted')
+  })
+
+  test('toggles video from uncropped Fit to edge-to-edge Fill', () => {
+    const { root, onControl } = renderControls()
+
+    click(root.querySelector('[aria-label="Video fit: Fit"]')!)
+
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'set-wall-fit-mode',
+      viewId: 17,
+      viewIdx: 3,
+      mode: 'fill',
+    })
+    expect(nextWallFitMode('fit')).toBe('fill')
+    expect(nextWallFitMode('fill')).toBe('fit')
   })
 })

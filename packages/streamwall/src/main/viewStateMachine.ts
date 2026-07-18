@@ -6,7 +6,7 @@ import {
   WebContentsView,
 } from 'electron'
 import { isEqual } from 'lodash-es'
-import { ViewContent, ViewPos } from 'streamwall-shared'
+import { ViewContent, ViewPos, type WallFitMode } from 'streamwall-shared'
 import {
   ContentDisplayOptions,
   ContentViewInfo,
@@ -130,6 +130,8 @@ const viewStateMachine = setup({
       // the mute/listening state: it is the level applied once the tile is
       // unmuted.
       volume: number
+      // Whether video is fully visible (fit) or cropped edge-to-edge (fill).
+      fitMode: WallFitMode
       // Human-readable reason for the current error, or null when healthy.
       error: string | null
       // Number of automatic reloads already spent on the current failure streak.
@@ -153,6 +155,7 @@ const viewStateMachine = setup({
     events: {} as
       | { type: 'OPTIONS'; options: ContentDisplayOptions }
       | { type: 'SET_VOLUME'; volume: number }
+      | { type: 'SET_FIT_MODE'; mode: WallFitMode }
       | {
           type: 'DISPLAY'
           pos: ViewPos
@@ -233,6 +236,10 @@ const viewStateMachine = setup({
     sendViewVolume: ({ context }, params: { volume: number }) => {
       const { view } = context
       view.webContents.send('volume', params.volume)
+    },
+
+    sendViewFitMode: ({ context }, params: { mode: WallFitMode }) => {
+      context.view.webContents.send('fit-mode', params.mode)
     },
 
     sendViewPause: ({ context }) => {
@@ -333,12 +340,13 @@ const viewStateMachine = setup({
     // options/volume/mute state that the retired view already had, since
     // none of `running`'s own entry actions re-fire for an in-place swap.
     resyncSwappedView: ({ context }) => {
-      const { view, options, volume, desiredAudio } = context
+      const { view, options, volume, fitMode, desiredAudio } = context
       view.webContents.audioMuted = desiredAudio === 'muted'
       if (options) {
         view.webContents.send('options', options)
       }
       view.webContents.send('volume', volume)
+      view.webContents.send('fit-mode', fitMode)
     },
   },
 
@@ -366,6 +374,10 @@ const viewStateMachine = setup({
 
     volumeChanged: ({ context }, params: { volume: number }) => {
       return context.volume !== params.volume
+    },
+
+    fitModeChanged: ({ context }, params: { mode: WallFitMode }) => {
+      return context.fitMode !== params.mode
     },
 
     // Whether the view is still allowed to reload itself automatically.
@@ -454,6 +466,7 @@ const viewStateMachine = setup({
     error: null,
     retryCount: 0,
     volume: 1,
+    fitMode: 'fit',
     desiredAudio: 'muted',
     desiredBlurred: false,
     desiredPaused: false,
@@ -517,6 +530,21 @@ const viewStateMachine = setup({
           guard: {
             type: 'volumeChanged',
             params: ({ event: { volume } }) => ({ volume }),
+          },
+        },
+        SET_FIT_MODE: {
+          actions: [
+            assign({
+              fitMode: ({ event }) => event.mode,
+            }),
+            {
+              type: 'sendViewFitMode',
+              params: ({ event: { mode } }) => ({ mode }),
+            },
+          ],
+          guard: {
+            type: 'fitModeChanged',
+            params: ({ event: { mode } }) => ({ mode }),
           },
         },
         // A manual reload is an operator override: reset the automatic retry

@@ -26,6 +26,7 @@ import {
   wallControlCommandSchema,
   type WallAudioMode,
   type WallControlCommand,
+  type WallFitMode,
 } from 'streamwall-shared'
 import { createActor, EventFrom, SnapshotFrom } from 'xstate'
 import {
@@ -89,6 +90,11 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   // an actor's current one, that view's webContents.id generally differs
   // from the actor's original `context.id`, so routing needs its own map.
   viewsByWebContentsId: Map<number, ViewActor>
+  // Wayland can emit maximize/restore before getContentSize() reflects the
+  // compositor's final allocation. Keep short follow-up probes so every layer
+  // converges without requiring a manual unmaximize/remaximize cycle.
+  resizeSyncTimer: ReturnType<typeof setTimeout> | undefined
+  lateResizeSyncTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(
     config: StreamWindowConfig,
@@ -156,7 +162,14 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     // Keep the wall responsive: when the window is resized / maximized /
     // fullscreened, rescale the background, overlay and stream views to fill
     // the new content area.
-    win.on('resize', () => this.handleResize())
+    const scheduleResizeSync = () => this.scheduleResizeSync()
+    win.on('resize', scheduleResizeSync)
+    win.on('maximize', scheduleResizeSync)
+    win.on('unmaximize', scheduleResizeSync)
+    win.on('restore', scheduleResizeSync)
+    win.on('show', scheduleResizeSync)
+    win.on('enter-full-screen', scheduleResizeSync)
+    win.on('leave-full-screen', scheduleResizeSync)
 
     this.win = win
 
@@ -167,6 +180,8 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
     this.offscreenWin = offscreenWin
     win.on('closed', () => {
+      clearTimeout(this.resizeSyncTimer)
+      clearTimeout(this.lateResizeSyncTimer)
       if (!offscreenWin.isDestroyed()) {
         offscreenWin.destroy()
       }
@@ -236,13 +251,13 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (!view) {
         return
       }
-      const { content, options, volume } = view.getSnapshot().context
+      const { content, options, volume, fitMode } = view.getSnapshot().context
       view.send({
         type: isFromNextView(view, ev.sender.id)
           ? 'NEXT_VIEW_INIT'
           : 'VIEW_INIT',
       })
-      return { content, options, volume, media: this.mediaConfig }
+      return { content, options, volume, fitMode, media: this.mediaConfig }
     })
     ipcMain.on('view-loaded', (ev) => {
       const view = this.viewsByWebContentsId.get(ev.sender.id)
@@ -299,7 +314,13 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   }
 
   handleResize() {
+    if (this.win.isDestroyed()) {
+      return
+    }
     const [width, height] = this.win.getContentSize()
+    if (width <= 0 || height <= 0) {
+      return
+    }
     if (width === this.config.width && height === this.config.height) {
       return
     }
@@ -311,6 +332,14 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     // Let the main process re-layout the stream views and rebroadcast state
     // (config is shared by reference, so the overlay gets the new dimensions).
     this.emit('resize')
+  }
+
+  scheduleResizeSync() {
+    this.handleResize()
+    clearTimeout(this.resizeSyncTimer)
+    clearTimeout(this.lateResizeSyncTimer)
+    this.resizeSyncTimer = setTimeout(() => this.handleResize(), 50)
+    this.lateResizeSyncTimer = setTimeout(() => this.handleResize(), 250)
   }
 
   /**
@@ -492,6 +521,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
           wallAudioMode:
             (context.desiredAudio ?? 'muted') === 'muted' ? 'muted' : 'unmuted',
           isPaused: context.desiredPaused,
+          wallFitMode: context.fitMode,
         },
       } satisfies ViewState
     })
@@ -754,10 +784,19 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.views.get(viewId)?.send({ type: 'SET_VOLUME', volume })
   }
 
+  setWallFitMode(viewId: number, mode: WallFitMode) {
+    this.views.get(viewId)?.send({ type: 'SET_FIT_MODE', mode })
+  }
+
   /** Restores persisted live-wall controls for the actor occupying one slot. */
   applyWallTileSettings(
     viewIdx: number,
-    settings: { audioMode: WallAudioMode; volume: number; paused: boolean },
+    settings: {
+      audioMode: WallAudioMode
+      volume: number
+      paused: boolean
+      fitMode: WallFitMode
+    },
   ) {
     const view = this.findViewByIdx(viewIdx)
     if (!view) {
@@ -767,6 +806,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.setWallVolume(viewId, settings.volume)
     this.setWallAudioMode(viewId, settings.audioMode)
     this.setWallPlayback(viewId, settings.paused)
+    this.setWallFitMode(viewId, settings.fitMode)
   }
 
   handleWallControl(command: WallControlCommand) {
@@ -779,6 +819,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         break
       case 'set-wall-audio-mode':
         this.setWallAudioMode(command.viewId, command.mode)
+        break
+      case 'set-wall-fit-mode':
+        this.setWallFitMode(command.viewId, command.mode)
         break
       case 'set-wall-tile-count':
       case 'set-wall-stream':

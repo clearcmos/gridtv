@@ -372,6 +372,7 @@ describe('viewStateMachine volume control', () => {
   // assert on what was forwarded to the view's webContents.
   function makeActorWithVolumeSpy(retry: RetryConfig) {
     const sendViewVolume = vi.fn()
+    const sendViewFitMode = vi.fn()
     const machine = viewStateMachine.provide({
       actions: {
         offscreenView: noop,
@@ -384,6 +385,7 @@ describe('viewStateMachine volume control', () => {
         openDevTools: noop,
         sendViewOptions: noop,
         sendViewVolume,
+        sendViewFitMode,
         sendViewPause: noop,
         sendViewResume: noop,
         logError: noop,
@@ -403,7 +405,7 @@ describe('viewStateMachine volume control', () => {
         disposeView: noopDisposeView,
       },
     })
-    return { actor, sendViewVolume }
+    return { actor, sendViewVolume, sendViewFitMode }
   }
 
   it('defaults volume to 1', () => {
@@ -447,6 +449,20 @@ describe('viewStateMachine volume control', () => {
     actor.send({ type: 'SET_VOLUME', volume: 0.5 })
 
     expect(sendViewVolume).toHaveBeenCalledTimes(1)
+  })
+
+  it('defaults to uncropped fit and forwards an explicit fill choice', () => {
+    const { actor, sendViewFitMode } = makeActorWithVolumeSpy(makeRetry())
+    actor.start()
+    display(actor)
+
+    expect(actor.getSnapshot().context.fitMode).toBe('fit')
+    actor.send({ type: 'SET_FIT_MODE', mode: 'fill' })
+
+    expect(actor.getSnapshot().context.fitMode).toBe('fill')
+    expect(sendViewFitMode).toHaveBeenCalledWith(expect.anything(), {
+      mode: 'fill',
+    })
   })
 })
 

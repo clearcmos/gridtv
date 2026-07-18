@@ -57,6 +57,10 @@ const volumeSchema = z.number().min(0).max(1)
 export const wallAudioModeSchema = z.enum(['muted', 'unmuted'])
 export type WallAudioMode = z.infer<typeof wallAudioModeSchema>
 
+/** Fit keeps the whole frame visible; fill deliberately crops to remove bars. */
+export const wallFitModeSchema = z.enum(['fit', 'fill'])
+export type WallFitMode = z.infer<typeof wallFitModeSchema>
+
 const liveTileCountSchema = z
   .number()
   .int()
@@ -86,6 +90,12 @@ export const wallControlCommandSchema = z.discriminatedUnion('type', [
     viewId: viewActorIdSchema,
     viewIdx: viewIdxSchema,
     mode: wallAudioModeSchema,
+  }),
+  z.object({
+    type: z.literal('set-wall-fit-mode'),
+    viewId: viewActorIdSchema,
+    viewIdx: viewIdxSchema,
+    mode: wallFitModeSchema,
   }),
   z.object({
     type: z.literal('set-wall-tile-count'),
@@ -428,6 +438,7 @@ const viewStateSchema = z.object({
     // desktop fork always emits both values; old snapshots default in the UI.
     wallAudioMode: wallAudioModeSchema.optional(),
     isPaused: z.boolean().optional(),
+    wallFitMode: wallFitModeSchema.optional(),
   }),
 })
 

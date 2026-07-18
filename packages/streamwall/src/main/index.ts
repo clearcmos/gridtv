@@ -1059,6 +1059,12 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         })
         persistLiveWall()
         break
+      case 'set-wall-fit-mode':
+        updateRegionSettings(command.viewIdx, {
+          fitMode: command.mode,
+        })
+        persistLiveWall()
+        break
       case 'set-wall-tile-count':
         setLiveTileCount(command.count)
         break

@@ -8,11 +8,12 @@ const invoke = vi.fn(() => new Promise(() => {}))
 const send = vi.fn()
 const on = vi.fn()
 const exposeInMainWorld = vi.fn()
+const insertCSS = vi.fn()
 
 vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld },
   ipcRenderer: { invoke, send, on },
-  webFrame: { executeJavaScript, insertCSS: vi.fn() },
+  webFrame: { executeJavaScript, insertCSS },
 }))
 
 type MediaApi = { reportError: (reason: string) => void }
@@ -33,6 +34,7 @@ describe('mediaPreload visibility spoofing', () => {
     send.mockClear()
     on.mockClear()
     exposeInMainWorld.mockClear()
+    insertCSS.mockClear()
   })
 
   it('overrides document.visibilityState/hidden in the page world as soon as the preload script runs', async () => {
@@ -189,7 +191,9 @@ describe("mediaPreload emptied handler's re-acquisition rejection", () => {
     send.mockClear()
     on.mockClear()
     exposeInMainWorld.mockClear()
+    insertCSS.mockClear()
     document.body.innerHTML = ''
+    document.documentElement.style.removeProperty('--streamwall-object-fit')
   })
 
   function viewErrorCalls() {
@@ -256,15 +260,17 @@ describe('mediaPreload pause/resume handling (issue #374)', () => {
     send.mockClear()
     on.mockClear()
     exposeInMainWorld.mockClear()
+    insertCSS.mockClear()
     document.body.innerHTML = ''
+    document.documentElement.style.removeProperty('--streamwall-object-fit')
   })
 
-  function registeredHandler(channel: string): () => void {
+  function registeredHandler(channel: string): (...args: unknown[]) => void {
     const call = on.mock.calls.find(([ch]) => ch === channel)
     if (!call) {
       throw new Error(`no ipcRenderer.on('${channel}', ...) handler registered`)
     }
-    return call[1] as () => void
+    return call[1] as (...args: unknown[]) => void
   }
 
   // Same acquisition setup as the emptied-handler tests above: a real <video>
@@ -312,6 +318,30 @@ describe('mediaPreload pause/resume handling (issue #374)', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(video.paused).toBe(false)
+  })
+
+  it('fits the whole frame by default and switches to cropped fill on demand', async () => {
+    await loadAcquiredVideo()
+
+    expect(insertCSS).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'object-fit: var(--streamwall-object-fit, contain)',
+      ),
+      { cssOrigin: 'user' },
+    )
+    expect(
+      document.documentElement.style.getPropertyValue(
+        '--streamwall-object-fit',
+      ),
+    ).toBe('contain')
+
+    registeredHandler('fit-mode')({}, 'fill')
+
+    expect(
+      document.documentElement.style.getPropertyValue(
+        '--streamwall-object-fit',
+      ),
+    ).toBe('cover')
   })
 
   it('does not throw when a pause/resume message arrives before any media has been acquired', async () => {

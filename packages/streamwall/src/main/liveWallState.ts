@@ -1,9 +1,14 @@
-import { clampLiveTileCount, type WallAudioMode } from 'streamwall-shared'
+import {
+  clampLiveTileCount,
+  type WallAudioMode,
+  type WallFitMode,
+} from 'streamwall-shared'
 
 export interface LiveWallTileSettings {
   audioMode: WallAudioMode
   volume: number
   paused: boolean
+  fitMode: WallFitMode
 }
 
 export interface LiveWallStoredState {
@@ -15,6 +20,7 @@ export const DEFAULT_LIVE_WALL_TILE_SETTINGS: LiveWallTileSettings = {
   audioMode: 'muted',
   volume: 1,
   paused: false,
+  fitMode: 'fit',
 }
 
 function normalizeVolume(value: unknown): number {
@@ -50,6 +56,7 @@ export function normalizeLiveWallState(
       audioMode: value?.audioMode === 'unmuted' ? 'unmuted' : 'muted',
       volume: normalizeVolume(value?.volume),
       paused: value?.paused === true,
+      fitMode: value?.fitMode === 'fill' ? 'fill' : 'fit',
     }
   }
 
@@ -91,6 +98,10 @@ export function updateLiveWallTileSettings(
         ? current.volume
         : normalizeVolume(patch.volume),
     paused: patch.paused ?? current.paused,
+    fitMode:
+      patch.fitMode === 'fit' || patch.fitMode === 'fill'
+        ? patch.fitMode
+        : current.fitMode,
   }
 }
 

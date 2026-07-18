@@ -357,6 +357,7 @@ export function Overlay({
             isPaused={context.isPaused ?? false}
             volume={context.volume}
             audioMode={wallAudioMode}
+            fitMode={context.wallFitMode ?? 'fit'}
             onControl={onControl}
           />
         )}

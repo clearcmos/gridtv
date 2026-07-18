@@ -1,13 +1,19 @@
 import { type JSX } from 'preact'
 import { useCallback } from 'preact/hooks'
 import {
+  FaCompressArrowsAlt,
+  FaExpandArrowsAlt,
   FaPause,
   FaPlay,
   FaVolumeDown,
   FaVolumeMute,
   FaVolumeUp,
 } from 'react-icons/fa'
-import type { WallAudioMode, WallControlCommand } from 'streamwall-shared'
+import type {
+  WallAudioMode,
+  WallControlCommand,
+  WallFitMode,
+} from 'streamwall-shared'
 import { styled } from 'styled-components'
 
 const NEXT_AUDIO_MODE: Record<WallAudioMode, WallAudioMode> = {
@@ -17,6 +23,15 @@ const NEXT_AUDIO_MODE: Record<WallAudioMode, WallAudioMode> = {
 
 export function nextWallAudioMode(mode: WallAudioMode): WallAudioMode {
   return NEXT_AUDIO_MODE[mode]
+}
+
+const NEXT_FIT_MODE: Record<WallFitMode, WallFitMode> = {
+  fit: 'fill',
+  fill: 'fit',
+}
+
+export function nextWallFitMode(mode: WallFitMode): WallFitMode {
+  return NEXT_FIT_MODE[mode]
 }
 
 const AUDIO_MODE_LABEL: Record<WallAudioMode, string> = {
@@ -40,6 +55,7 @@ export function WallMediaControls({
   isPaused,
   volume,
   audioMode,
+  fitMode,
   onControl,
 }: {
   viewId: number
@@ -47,6 +63,7 @@ export function WallMediaControls({
   isPaused: boolean
   volume: number
   audioMode: WallAudioMode
+  fitMode: WallFitMode
   onControl: (command: WallControlCommand) => void
 }) {
   const handlePlaybackClick = useCallback(() => {
@@ -81,6 +98,15 @@ export function WallMediaControls({
     })
   }, [audioMode, onControl, viewId, viewIdx])
 
+  const handleFitModeClick = useCallback(() => {
+    onControl({
+      type: 'set-wall-fit-mode',
+      viewId,
+      viewIdx,
+      mode: nextWallFitMode(fitMode),
+    })
+  }, [fitMode, onControl, viewId, viewIdx])
+
   const modeLabel = AUDIO_MODE_LABEL[audioMode]
   const nextModeLabel = AUDIO_MODE_LABEL[nextWallAudioMode(audioMode)]
 
@@ -114,6 +140,21 @@ export function WallMediaControls({
           title={`Volume ${Math.round(volume * 100)}%`}
         />
       </VolumeGroup>
+
+      <FitModeButton
+        type="button"
+        onClick={handleFitModeClick}
+        aria-label={`Video fit: ${fitMode === 'fit' ? 'Fit' : 'Fill'}`}
+        title={
+          fitMode === 'fit'
+            ? 'Fit: whole frame visible; click to fill and crop'
+            : 'Fill: edge-to-edge crop; click to fit the whole frame'
+        }
+        $mode={fitMode}
+      >
+        {fitMode === 'fit' ? <FaCompressArrowsAlt /> : <FaExpandArrowsAlt />}
+        <ModeText>{fitMode === 'fit' ? 'Fit' : 'Fill'}</ModeText>
+      </FitModeButton>
 
       <AudioModeButton
         type="button"
@@ -242,12 +283,31 @@ const AudioModeButton = styled(ControlButton)<{ $mode: WallAudioMode }>`
   }
 `
 
+const FitModeButton = styled(ControlButton)<{ $mode: WallFitMode }>`
+  width: auto;
+  min-width: clamp(48px, 17cqw, 82px);
+  gap: 0.4em;
+  padding: 0 clamp(7px, 2.4cqw, 12px);
+  background: ${({ $mode }) =>
+    $mode === 'fit' ? 'rgba(37, 99, 235, 0.9)' : 'rgba(124, 58, 237, 0.9)'};
+
+  svg {
+    width: clamp(12px, 5cqh, 18px);
+    height: clamp(12px, 5cqh, 18px);
+  }
+
+  @container (max-width: 300px) {
+    min-width: clamp(27px, 12cqh, 42px);
+    padding: 0;
+  }
+`
+
 const ModeText = styled.span`
   font-size: clamp(9px, 4.5cqh, 13px);
   font-weight: 700;
   white-space: nowrap;
 
-  @container (max-width: 250px) {
+  @container (max-width: 300px) {
     display: none;
   }
 `

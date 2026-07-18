@@ -1,7 +1,7 @@
 import type { Delta } from 'jsondiffpatch'
 import type { ViewContent, ViewPos } from './geometry.ts'
 import type { StreamwallRole } from './roles.ts'
-import type { ControlCommand, WallAudioMode } from './schemas.ts'
+import type { ControlCommand, WallAudioMode, WallFitMode } from './schemas.ts'
 
 export interface StreamWindowConfig {
   cols: number
@@ -91,6 +91,8 @@ export interface ViewState {
     wallAudioMode?: WallAudioMode
     /** Whether playback was paused from the wall-side hover controls. */
     isPaused?: boolean
+    /** Whether the whole frame is fitted or cropped to fill its tile. */
+    wallFitMode?: WallFitMode
   }
 }
 

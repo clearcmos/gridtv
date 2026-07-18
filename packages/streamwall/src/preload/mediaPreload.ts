@@ -42,7 +42,7 @@ const VIDEO_OVERRIDE_STYLE = `
     bottom: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
-    object-fit: cover !important;
+    object-fit: var(--streamwall-object-fit, contain) !important;
     transition: none !important;
     z-index: 999999 !important;
   }
@@ -320,6 +320,7 @@ async function main() {
       content,
       options: initialOptions,
       volume: initialVolume,
+      fitMode: initialFitMode,
       media: receivedMediaConfig,
     },
   ] = await Promise.all([viewInit, pageReady])
@@ -340,6 +341,29 @@ async function main() {
   // acquisition, e.g. the 'emptied' handler below), so a PAUSE/RESUME
   // message received at any point can act on whichever one is current.
   let currentMedia: HTMLMediaElement | undefined
+  let latestFitMode: 'fit' | 'fill' = initialFitMode === 'fill' ? 'fill' : 'fit'
+
+  function applyFitMode() {
+    const objectFit = latestFitMode === 'fill' ? 'cover' : 'contain'
+    // The media may live in a same-origin iframe document. Set the custom
+    // property in both roots; VIDEO_OVERRIDE_STYLE consumes it from whichever
+    // document owns the acquired element.
+    document.documentElement.style.setProperty(
+      '--streamwall-object-fit',
+      objectFit,
+    )
+    currentMedia?.ownerDocument.documentElement.style.setProperty(
+      '--streamwall-object-fit',
+      objectFit,
+    )
+  }
+
+  ipcRenderer.on('fit-mode', (_event, mode: unknown) => {
+    latestFitMode = mode === 'fill' ? 'fill' : 'fit'
+    applyFitMode()
+  })
+  applyFitMode()
+
   async function acquireMedia(elementTimeout: number) {
     let snapshotInterval: number | undefined
 
@@ -347,6 +371,7 @@ async function main() {
     console.log('media acquired', media)
 
     currentMedia = media
+    applyFitMode()
     volumeController = new VolumeController(media, latestVolume)
     ipcRenderer.send('view-loaded')
 

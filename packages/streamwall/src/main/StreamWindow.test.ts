@@ -88,6 +88,56 @@ describe('StreamWindow.setGridSize', () => {
   })
 })
 
+describe('StreamWindow maximize/Wayland resize synchronization', () => {
+  it('rechecks content size after a window-state event reports stale geometry', () => {
+    vi.useFakeTimers()
+    try {
+      const sw = makeStreamWindow(makeConfig({ width: 100, height: 100 }))
+      const getContentSize = vi
+        .fn()
+        .mockReturnValueOnce([100, 100])
+        .mockReturnValue([200, 150])
+      sw.win = {
+        isDestroyed: () => false,
+        getContentSize,
+      } as unknown as InstanceType<typeof StreamWindow>['win']
+      sw.backgroundView = {
+        setBounds: vi.fn(),
+      } as unknown as InstanceType<typeof StreamWindow>['backgroundView']
+      sw.overlayView = {
+        setBounds: vi.fn(),
+      } as unknown as InstanceType<typeof StreamWindow>['overlayView']
+      sw.offscreenWin = {
+        setContentSize: vi.fn(),
+      } as unknown as InstanceType<typeof StreamWindow>['offscreenWin']
+      const emit = vi.spyOn(sw, 'emit')
+
+      sw.scheduleResizeSync()
+      expect(sw.config.width).toBe(100)
+
+      vi.advanceTimersByTime(50)
+
+      expect(sw.config.width).toBe(200)
+      expect(sw.config.height).toBe(150)
+      expect(sw.backgroundView.setBounds).toHaveBeenCalledWith({
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 150,
+      })
+      expect(sw.overlayView.setBounds).toHaveBeenCalledWith({
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 150,
+      })
+      expect(emit).toHaveBeenCalledWith('resize')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 /**
  * A minimal stand-in for a ViewActor: enough of the `getSnapshot()`/`send()`
  * surface for setViewVolume/sendViewEvent/findViewByIdx to operate on,
@@ -156,7 +206,7 @@ describe('StreamWindow.emitState', () => {
     ])
   })
 
-  it('includes wall audio mode and paused state in the emitted view context', () => {
+  it('includes wall audio, pause, and fit modes in the emitted view context', () => {
     const sw = makeStreamWindow(makeConfig())
     sw.views = new Map([
       [
@@ -172,6 +222,7 @@ describe('StreamWindow.emitState', () => {
             volume: 0.6,
             desiredAudio: 'listening',
             desiredPaused: true,
+            fitMode: 'fill',
           },
         }),
       ],
@@ -188,6 +239,7 @@ describe('StreamWindow.emitState', () => {
           context: expect.objectContaining({
             wallAudioMode: 'unmuted',
             isPaused: true,
+            wallFitMode: 'fill',
           }),
         },
       ],
@@ -243,7 +295,7 @@ describe('StreamWindow wall media controls', () => {
     expect(second.send).toHaveBeenCalledWith({ type: 'UNMUTE' })
   })
 
-  it('routes playback and volume commands to the selected view actor', () => {
+  it('routes playback, volume, and fit commands to the selected view actor', () => {
     const sw = makeStreamWindow(makeConfig())
     const { actor, send } = makeWallControlActor()
     sw.views = new Map([[17, actor]])
@@ -260,9 +312,16 @@ describe('StreamWindow wall media controls', () => {
       viewIdx: 0,
       volume: 0.4,
     })
+    sw.handleWallControl({
+      type: 'set-wall-fit-mode',
+      viewId: 17,
+      viewIdx: 0,
+      mode: 'fill',
+    })
 
     expect(send).toHaveBeenCalledWith({ type: 'PAUSE' })
     expect(send).toHaveBeenCalledWith({ type: 'SET_VOLUME', volume: 0.4 })
+    expect(send).toHaveBeenCalledWith({ type: 'SET_FIT_MODE', mode: 'fill' })
   })
 
   it('ignores commands for a stale view id', () => {
