@@ -128,16 +128,16 @@ const StreamTitle = styled.div<{
       return `bottom: 0; left: 0;`
     }
   }}
-  max-width: calc(100% - 10px);
+  max-width: calc(100% - clamp(4px, 2cqw, 10px));
   box-sizing: border-box;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 10px;
-  margin: 5px;
+  padding: clamp(2px, 1cqh, 4px) clamp(4px, 2cqw, 10px);
+  margin: clamp(2px, 1cqh, 5px);
   font-weight: 600;
-  font-size: 20px;
+  font-size: clamp(9px, 7cqh, 20px);
   color: white;
   text-shadow: 0 0 4px black;
   letter-spacing: -0.025em;
@@ -145,7 +145,7 @@ const StreamTitle = styled.div<{
     Color($isListening ? $activeColor : 'black')
       .alpha(0.5)
       .toString()};
-  border-radius: 4px;
+  border-radius: clamp(2px, 1cqh, 4px);
   backdrop-filter: blur(10px);
   overflow: hidden;
 
@@ -183,10 +183,10 @@ const StreamLocation = styled.div`
 
   display: flex;
   align-items: center;
-  gap: 3px;
-  margin: 5px 9px;
+  gap: clamp(1px, 0.8cqh, 3px);
+  margin: clamp(2px, 1cqh, 5px) clamp(4px, 1.8cqw, 9px);
   font-weight: 800;
-  font-size: 14px;
+  font-size: clamp(8px, 5cqh, 14px);
   color: white;
   letter-spacing: -0.025em;
   opacity: 0.9;
@@ -208,8 +208,8 @@ const LoadingSpinner = styled(TailSpin)<{ $isVisible: boolean }>`
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 100px;
-  height: 100px;
+  width: clamp(24px, 35cqh, 100px);
+  height: clamp(24px, 35cqh, 100px);
   opacity: ${({ $isVisible }) => ($isVisible ? 0.5 : 0)};
 
   transition:
@@ -241,8 +241,8 @@ const ErrorCover = styled.div`
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px;
+  gap: clamp(3px, 2cqh, 8px);
+  padding: clamp(4px, 3cqh, 12px);
   box-sizing: border-box;
   text-align: center;
   color: white;
@@ -256,8 +256,8 @@ const ErrorIcon = styled.div`
   filter: drop-shadow(0 0 6px black);
 
   svg {
-    width: 44px;
-    height: 44px;
+    width: clamp(18px, 15cqh, 44px);
+    height: clamp(18px, 15cqh, 44px);
   }
 `
 
@@ -267,7 +267,7 @@ const ErrorHeading = styled.div`
   gap: 0.35em;
   max-width: 100%;
   font-weight: 700;
-  font-size: 22px;
+  font-size: clamp(10px, 7cqh, 22px);
   letter-spacing: -0.025em;
   text-shadow: 0 0 4px black;
 
@@ -291,7 +291,7 @@ const ErrorHeading = styled.div`
 
 const ErrorReason = styled.div`
   max-width: 100%;
-  font-size: 15px;
+  font-size: clamp(8px, 4.5cqh, 15px);
   font-weight: 500;
   line-height: 1.3;
   opacity: 0.9;

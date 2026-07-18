@@ -40,10 +40,9 @@ function hotkeyLayerBindingsFor(
  * the control UI runs primarily in the Electron control window and the
  * handler preventDefault()s.)
  *
- * Grids can have up to GRID_MAX * GRID_MAX = 64 cells, but cells 40-63 (only
- * reachable on 7x7/8x8 grids) are intentionally left without a hotkey rather
- * than introducing a fragile triple-modifier layer that conflicts with OS
- * shortcuts.
+ * Dense grids can contain far more cells, but cells after 39 are intentionally
+ * left without a hotkey rather than introducing fragile modifier layers that
+ * conflict with OS shortcuts.
  */
 export const hotkeyLayers = [
   { prefix: 'alt', label: 'Alt' },

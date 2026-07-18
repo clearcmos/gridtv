@@ -25,7 +25,10 @@ function loadWithHlsJs(src: string) {
   if (!ALLOWED_SRC_PATTERN.test(src)) return
 
   const videoEl = document.createElement('video')
-  const hls = new Hls()
+  // Do not decode a variant larger than the tile that can display it. This is
+  // especially important in dense walls where a 320x180 tile would otherwise
+  // be eligible for a 1080p rendition.
+  const hls = new Hls({ capLevelToPlayerSize: true })
   let fatalErrorRetries = 0
   let destroyed = false
 

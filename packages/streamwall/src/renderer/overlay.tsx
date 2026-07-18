@@ -35,7 +35,14 @@ function App() {
   }
 
   const { config, views, streams } = state
-  return <Overlay config={config} views={views} streams={streams} />
+  return (
+    <Overlay
+      config={config}
+      views={views}
+      streams={streams}
+      onControl={window.streamwallLayer.control}
+    />
+  )
 }
 
 render(<App />, document.body)

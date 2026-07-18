@@ -21,10 +21,16 @@ import WebSocket from 'ws'
 import yargs from 'yargs'
 import * as Y from 'yjs'
 import {
+  DEFAULT_STREAM_MEDIA_CONFIG,
+  STREAM_SESSION_MODES,
+  type StreamSessionMode,
+} from '../mediaConfig'
+import {
   SENTRY_DSN,
   SENTRY_ENABLED_SWITCH,
   sentryEnabledSwitchValue,
 } from '../sentryConfig'
+import { TWITCH_QUALITIES, type TwitchQuality } from '../twitchPlayer'
 import { createSessionHostResolver, ensureValidURL } from '../util'
 import { dispatchCommand, dispatchLocalCommand } from './commandDispatch'
 import {
@@ -57,6 +63,7 @@ import {
   applyLayoutPreset,
   buildLayoutPreset,
 } from './layoutPresets'
+import { devServerOrigin } from './loadHTML'
 import log, {
   LOG_LEVELS,
   initLogger,
@@ -65,7 +72,7 @@ import log, {
 } from './logger'
 import { installApplicationMenu } from './menu'
 import { denyWindowOpen } from './navigationSecurity'
-import { BROWSE_PARTITION, hardenSession } from './partitions'
+import { browsePartition, hardenSession } from './partitions'
 import { PlaylistScheduler } from './playlist'
 import { loadPresetPack } from './presets'
 import { flushStorage, loadStorage, safeUpdate } from './storage'
@@ -148,6 +155,14 @@ export interface StreamwallConfig {
   }
   park: {
     pause: boolean
+  }
+  media: {
+    'session-mode': StreamSessionMode
+    'twitch-player': boolean
+    'twitch-quality': TwitchQuality
+    'snapshot-interval': number
+    'snapshot-max-width': number
+    'snapshot-quality': number
   }
   twitch: {
     channel: string | null
@@ -362,6 +377,49 @@ function parseArgs(): StreamwallConfig {
     })
     .group(
       [
+        'media.session-mode',
+        'media.twitch-player',
+        'media.twitch-quality',
+        'media.snapshot-interval',
+        'media.snapshot-max-width',
+        'media.snapshot-quality',
+      ],
+      'Media scaling',
+    )
+    .option('media.session-mode', {
+      describe:
+        'Reuse one persistent stream cache/login, or isolate every stream view',
+      choices: STREAM_SESSION_MODES,
+      default: DEFAULT_STREAM_MEDIA_CONFIG.sessionMode,
+    })
+    .option('media.twitch-player', {
+      describe:
+        "Use Twitch's lightweight player instead of its full site for channel URLs",
+      boolean: true,
+      default: DEFAULT_STREAM_MEDIA_CONFIG.twitchPlayer,
+    })
+    .option('media.twitch-quality', {
+      describe: 'Twitch rendition used for dense stream walls',
+      choices: TWITCH_QUALITIES,
+      default: DEFAULT_STREAM_MEDIA_CONFIG.twitchQuality,
+    })
+    .option('media.snapshot-interval', {
+      describe: 'Seconds between bounded poster snapshots (0 to disable)',
+      number: true,
+      default: DEFAULT_STREAM_MEDIA_CONFIG.snapshotIntervalMs / 1000,
+    })
+    .option('media.snapshot-max-width', {
+      describe: 'Maximum poster snapshot width in pixels',
+      number: true,
+      default: DEFAULT_STREAM_MEDIA_CONFIG.snapshotMaxWidth,
+    })
+    .option('media.snapshot-quality', {
+      describe: 'WebP poster snapshot quality from 0 to 1',
+      number: true,
+      default: DEFAULT_STREAM_MEDIA_CONFIG.snapshotQuality,
+    })
+    .group(
+      [
         'twitch.channel',
         'twitch.username',
         'twitch.token',
@@ -492,6 +550,14 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     streamWindowConfig,
     retryConfig,
     argv.park.pause,
+    {
+      sessionMode: argv.media['session-mode'],
+      twitchPlayer: argv.media['twitch-player'],
+      twitchQuality: argv.media['twitch-quality'],
+      snapshotIntervalMs: argv.media['snapshot-interval'] * 1000,
+      snapshotMaxWidth: argv.media['snapshot-max-width'],
+      snapshotQuality: argv.media['snapshot-quality'],
+    },
   )
   const controlWindow = new ControlWindow({
     configPath: userConfigPath,
@@ -682,13 +748,18 @@ async function main(argv: ReturnType<typeof parseArgs>) {
           webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            // Keep the operator's browsing isolated from the stream views and
-            // off disk by using a dedicated ephemeral partition.
-            partition: BROWSE_PARTITION,
+            // Shared mode lets an operator authenticate once and lets all
+            // stream views reuse the same browser cache. Isolated mode keeps
+            // the original separate ephemeral browse session.
+            partition: browsePartition(argv.media['session-mode']),
             sandbox: true,
           },
         })
-        hardenSession(browseWindow.webContents.session)
+        hardenSession(browseWindow.webContents.session, {
+          // Keep the shared session's policy identical regardless of whether
+          // the browse window or a stream view is the first context created.
+          allowedOrigins: [devServerOrigin()].filter((o) => o !== undefined),
+        })
         // Deny popups; the browse window is meant to show a single URL.
         denyWindowOpen(browseWindow.webContents)
       }

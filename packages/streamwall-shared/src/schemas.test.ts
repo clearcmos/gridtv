@@ -7,6 +7,7 @@ import {
   parseStreamList,
   streamDataInputSchema,
   streamwallStateSchema,
+  wallControlCommandSchema,
 } from './schemas.ts'
 import type { StreamwallState } from './types.ts'
 
@@ -143,6 +144,32 @@ describe('localStreamDataSchema', () => {
     expect(
       localStreamDataSchema.safeParse({ link: '', kind: 'video' }).success,
     ).toBe(false)
+  })
+})
+
+describe('wallControlCommandSchema', () => {
+  test('accepts each wall media command', () => {
+    for (const command of [
+      { type: 'set-wall-playback', viewId: 17, paused: true },
+      { type: 'set-wall-volume', viewId: 17, volume: 0.45 },
+      { type: 'set-wall-audio-mode', viewId: 17, mode: 'stage' },
+      { type: 'set-wall-audio-mode', viewId: 17, mode: 'muted' },
+      { type: 'set-wall-audio-mode', viewId: 17, mode: 'unmuted' },
+    ]) {
+      expect(wallControlCommandSchema.safeParse(command).success).toBe(true)
+    }
+  })
+
+  test('rejects malformed wall media commands', () => {
+    for (const command of [
+      { type: 'set-wall-playback', viewId: -1, paused: true },
+      { type: 'set-wall-playback', viewId: 1, paused: 'yes' },
+      { type: 'set-wall-volume', viewId: 1, volume: 1.1 },
+      { type: 'set-wall-audio-mode', viewId: 1, mode: 'solo' },
+      { type: 'unknown-wall-command', viewId: 1 },
+    ]) {
+      expect(wallControlCommandSchema.safeParse(command).success).toBe(false)
+    }
   })
 })
 
@@ -559,6 +586,27 @@ describe('streamwallStateSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  test('does not confuse a WebContents actor id with a bounded grid index', () => {
+    const state = {
+      ...VALID_STATE,
+      views: [
+        {
+          state: 'empty',
+          context: {
+            id: 10_000,
+            content: null,
+            info: null,
+            pos: null,
+            error: null,
+            volume: 1,
+          },
+        },
+      ],
+    }
+
+    expect(streamwallStateSchema.safeParse(state).success).toBe(true)
+  })
+
   test('accepts a state with populated streams, views and layout presets', () => {
     const full = {
       ...VALID_STATE,
@@ -602,6 +650,8 @@ describe('streamwallStateSchema', () => {
             pos: { x: 0, y: 0, width: 100, height: 100, spaces: [1] },
             error: null,
             volume: 0.5,
+            wallAudioMode: 'unmuted',
+            isPaused: true,
           },
         },
       ],
@@ -627,6 +677,10 @@ describe('streamwallStateSchema', () => {
     }
     const result = streamwallStateSchema.safeParse(full)
     expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.views[1].context.wallAudioMode).toBe('unmuted')
+      expect(result.data.views[1].context.isPaused).toBe(true)
+    }
   })
 
   test('rejects a state missing the required streams field', () => {

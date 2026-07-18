@@ -158,7 +158,10 @@ export function idxToCoords(cols: number, idx: number) {
 
 /** Inclusive bounds for grid dimensions (columns / rows). */
 export const GRID_MIN = 1
-export const GRID_MAX = 8
+// 16×16 keeps cell indices compact while comfortably covering 10×10 CCTV
+// walls. The practical live-video limit is hardware/network dependent, but
+// the layout and control protocol should not be the first bottleneck.
+export const GRID_MAX = 16
 
 /** Rounds and clamps a grid dimension into [GRID_MIN, GRID_MAX]. */
 export function clampGridDimension(n: number): number {

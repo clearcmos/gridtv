@@ -15,6 +15,7 @@ const Events = {
 }
 
 let lastInstance: MockHls | undefined
+let lastConfig: unknown
 
 function registerInstance(instance: MockHls) {
   lastInstance = instance
@@ -43,7 +44,8 @@ class MockHls {
     }
   }
 
-  constructor() {
+  constructor(config?: unknown) {
+    lastConfig = config
     registerInstance(this)
   }
 }
@@ -66,6 +68,7 @@ describe('playHLS', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     lastInstance = undefined
+    lastConfig = undefined
     MockHls.isSupported.mockReturnValue(true)
     reportError.mockClear()
     ;(window as unknown as { streamwallMedia: unknown }).streamwallMedia = {
@@ -107,6 +110,13 @@ describe('playHLS', () => {
     await import('./playHLS')
 
     expect(reportError).not.toHaveBeenCalled()
+  })
+
+  it('caps automatic HLS quality to the rendered player size', async () => {
+    setSrc('https://stream.example/live.m3u8')
+    await import('./playHLS')
+
+    expect(lastConfig).toEqual({ capLevelToPlayerSize: true })
   })
 
   it('appends the video element once the manifest has parsed', async () => {

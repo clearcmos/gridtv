@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import {
   allocateViewPartition,
   BROWSE_PARTITION,
+  browsePartition,
   createPartitionAllocator,
   hardenSession,
   installRequestSSRFGuard,
+  SHARED_STREAM_PARTITION,
+  streamViewPartition,
 } from './partitions'
 
 type RequestListener = (
@@ -110,6 +113,22 @@ test('BROWSE_PARTITION is ephemeral and isolated from stream views', () => {
   )
 })
 
+test('shared mode reuses one persistent partition for views and browsing', () => {
+  assert.ok(SHARED_STREAM_PARTITION.startsWith('persist:'))
+  assert.equal(streamViewPartition('shared'), SHARED_STREAM_PARTITION)
+  assert.equal(streamViewPartition('shared'), SHARED_STREAM_PARTITION)
+  assert.equal(browsePartition('shared'), SHARED_STREAM_PARTITION)
+})
+
+test('isolated mode keeps unique stream partitions and a separate browser', () => {
+  const first = streamViewPartition('isolated')
+  const second = streamViewPartition('isolated')
+  assert.notEqual(first, second)
+  assert.ok(first.startsWith('view-'))
+  assert.ok(second.startsWith('view-'))
+  assert.equal(browsePartition('isolated'), BROWSE_PARTITION)
+})
+
 test('hardenSession registers a permission request handler', () => {
   const session = fakeSession()
   let registered = false
@@ -153,6 +172,21 @@ test('hardenSession also installs the network-layer SSRF guard', async () => {
     false,
     'a public request must be allowed',
   )
+})
+
+test('hardenSession only registers handlers once for a shared session', () => {
+  const session = fakeSession()
+  const setPermissionRequestHandler = vi.spyOn(
+    session,
+    'setPermissionRequestHandler',
+  )
+  const onBeforeRequest = vi.spyOn(session.webRequest, 'onBeforeRequest')
+
+  hardenSession(session)
+  hardenSession(session)
+
+  assert.equal(setPermissionRequestHandler.mock.calls.length, 1)
+  assert.equal(onBeforeRequest.mock.calls.length, 1)
 })
 
 // A resolver stub keeps the guard tests off the network and deterministic.

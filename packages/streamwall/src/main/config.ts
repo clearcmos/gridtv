@@ -1,6 +1,8 @@
 import TOML from '@iarna/toml'
 import { GRID_MAX, GRID_MIN, MAX_VIEW_IDX } from 'streamwall-shared'
 import { z } from 'zod'
+import { STREAM_SESSION_MODES } from '../mediaConfig'
+import { TWITCH_QUALITIES } from '../twitchPlayer'
 import { LOG_LEVELS } from './logger'
 
 /**
@@ -88,6 +90,14 @@ const streamwallConfigSchema = z.object({
   }),
   park: z.object({
     pause: z.boolean(),
+  }),
+  media: z.object({
+    'session-mode': z.enum(STREAM_SESSION_MODES),
+    'twitch-player': z.boolean(),
+    'twitch-quality': z.enum(TWITCH_QUALITIES),
+    'snapshot-interval': nonNegativeNumber,
+    'snapshot-max-width': positiveInt,
+    'snapshot-quality': z.number().min(0).max(1),
   }),
   twitch: z.object({
     channel: z.string().nullable(),

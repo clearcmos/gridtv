@@ -8,14 +8,15 @@
  * to disk and survives across app restarts; any other name lives only in memory
  * and is discarded when its last web context goes away.
  *
- * To prevent cross-site data bleed and persistent tracking, every stream view
- * gets its own unique, ephemeral partition and the browse window gets a separate
- * ephemeral partition of its own.
+ * Operators may choose between a shared persistent stream session (the scaling
+ * default, which reuses site caches and login state) and a unique ephemeral
+ * session per view (the stricter privacy/isolation mode).
  *
  * @see https://www.electronjs.org/docs/latest/api/session
  */
 
 import type { Session } from 'electron'
+import type { StreamSessionMode } from '../mediaConfig'
 import { createSessionHostResolver, findRequestBlockReason } from '../util'
 import log from './logger'
 
@@ -27,6 +28,14 @@ const VIEW_PARTITION_PREFIX = 'view-'
  * persisted to disk.
  */
 export const BROWSE_PARTITION = 'browse'
+
+/**
+ * Persistent partition shared by stream views and the operator browse window
+ * in scaling mode. Same-origin rules still isolate unrelated sites' cookies;
+ * sharing the browser session avoids one duplicate Twitch cache per tile and
+ * lets a Twitch login apply to every Twitch view.
+ */
+export const SHARED_STREAM_PARTITION = 'persist:streamwall-streams'
 
 /**
  * Creates a partition-name allocator. Each call to the returned function yields
@@ -48,6 +57,14 @@ export const allocateViewPartition = createPartitionAllocator(
   VIEW_PARTITION_PREFIX,
 )
 
+export function streamViewPartition(mode: StreamSessionMode): string {
+  return mode === 'shared' ? SHARED_STREAM_PARTITION : allocateViewPartition()
+}
+
+export function browsePartition(mode: StreamSessionMode): string {
+  return mode === 'shared' ? SHARED_STREAM_PARTITION : BROWSE_PARTITION
+}
+
 // Minimal structural view of the request-filtering surface a session exposes,
 // so the guard can be exercised without a running Electron app.
 type RequestListener = (
@@ -61,6 +78,11 @@ interface RequestFilteringSession {
   }
   resolveHost(host: string): Promise<{ endpoints: { address: string }[] }>
 }
+
+// A shared partition returns the same Electron Session object to every view.
+// Registering its permission and webRequest handlers repeatedly just replaces
+// equivalent handlers and retains unnecessary closures, so harden it once.
+const hardenedSessions = new WeakSet<object>()
 
 export interface RequestGuardOptions {
   /**
@@ -158,8 +180,12 @@ export function hardenSession(
     RequestFilteringSession,
   options: RequestGuardOptions = {},
 ): void {
+  if (hardenedSessions.has(session)) {
+    return
+  }
   session.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false)
   })
   installRequestSSRFGuard(session, options)
+  hardenedSessions.add(session)
 }

@@ -72,6 +72,7 @@ function renderOverlay(
         config={makeConfig(views.length)}
         views={views}
         streams={streams}
+        onControl={() => {}}
       />,
       container!,
     )
@@ -115,6 +116,7 @@ describe('overlay view identity across a shrinking view list', () => {
           config={makeConfig(1)}
           views={[makeView(1, 'view-1')]}
           streams={streams}
+          onControl={() => {}}
         />,
         root,
       )

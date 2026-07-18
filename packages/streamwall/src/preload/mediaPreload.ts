@@ -1,7 +1,19 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import throttle from 'lodash/throttle'
 import { ContentDisplayOptions } from 'streamwall-shared'
+import { DEFAULT_STREAM_MEDIA_CONFIG } from '../mediaConfig'
+import { configureTwitchPlayerQuality } from '../twitchPlayer'
+import { SnapshotController } from './snapshotController'
 import { VolumeController } from './volumeController'
+
+// This preload runs before the remote page's scripts. Apply Twitch's persisted
+// player preference now so the first rendition request uses the configured
+// density-oriented quality instead of briefly starting at source/720p.
+configureTwitchPlayerQuality(
+  window.location.href,
+  window.localStorage,
+  process.argv,
+)
 
 const SCAN_THROTTLE = 500
 const INITIAL_TIMEOUT = 10 * 1000
@@ -119,50 +131,6 @@ class RotationController {
   setCustom(rotation = 0) {
     this.customRotation = rotation
     this._update()
-  }
-}
-
-class SnapshotController {
-  canvas: HTMLCanvasElement
-  ctx!: CanvasRenderingContext2D
-  latestSnapshotURL: string | null = null
-
-  constructor() {
-    this.canvas = document.createElement('canvas')
-  }
-
-  async snapshotVideo(videoEl: HTMLVideoElement) {
-    if (!('requestVideoFrameCallback' in videoEl)) {
-      console.warn('requestVideoFrameCallback not supported')
-      return
-    }
-
-    videoEl.requestVideoFrameCallback(() => {
-      const { canvas } = this
-      canvas.width = videoEl.videoWidth
-      canvas.height = videoEl.videoHeight
-
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        console.warn('could not get canvas context')
-        return
-      }
-
-      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height)
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          console.warn('could not create blob from canvas')
-          return
-        }
-
-        if (this.latestSnapshotURL) {
-          URL.revokeObjectURL(this.latestSnapshotURL)
-        }
-
-        const url = URL.createObjectURL(blob)
-        videoEl.poster = url
-      }, 'image/png')
-    })
   }
 }
 
@@ -347,10 +315,23 @@ async function main() {
   const viewInit = ipcRenderer.invoke('view-init')
   const pageReady = new Promise((resolve) => process.once('loaded', resolve))
 
-  const [{ content, options: initialOptions, volume: initialVolume }] =
-    await Promise.all([viewInit, pageReady])
+  const [
+    {
+      content,
+      options: initialOptions,
+      volume: initialVolume,
+      media: receivedMediaConfig,
+    },
+  ] = await Promise.all([viewInit, pageReady])
 
-  const snapshotController = new SnapshotController()
+  const mediaConfig = {
+    ...DEFAULT_STREAM_MEDIA_CONFIG,
+    ...receivedMediaConfig,
+  }
+  const snapshotController = new SnapshotController(mediaConfig)
+  window.addEventListener('pagehide', () => snapshotController.dispose(), {
+    once: true,
+  })
 
   let rotationController: RotationController | undefined
   let volumeController: VolumeController | undefined
@@ -369,11 +350,17 @@ async function main() {
     volumeController = new VolumeController(media, latestVolume)
     ipcRenderer.send('view-loaded')
 
-    if (content.kind === 'video' && media instanceof HTMLVideoElement) {
+    if (
+      content.kind === 'video' &&
+      media instanceof HTMLVideoElement &&
+      mediaConfig.snapshotIntervalMs > 0
+    ) {
       rotationController = new RotationController(media)
       snapshotInterval = window.setInterval(() => {
         snapshotController.snapshotVideo(media)
-      }, 1000)
+      }, mediaConfig.snapshotIntervalMs)
+    } else if (content.kind === 'video' && media instanceof HTMLVideoElement) {
+      rotationController = new RotationController(media)
     }
 
     media.addEventListener(

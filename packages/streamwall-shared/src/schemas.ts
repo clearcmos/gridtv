@@ -42,8 +42,48 @@ const orientationSchema = z.enum(['V', 'H'])
 
 const rotationSchema = z.number().min(0).max(MAX_ROTATION)
 const viewIdxSchema = z.number().int().min(0).max(MAX_VIEW_IDX)
+// Electron WebContents ids identify live actors and are not grid indices. A
+// dense 16x16 wall can create more than MAX_VIEW_IDX web contents once the
+// control/background/overlay views and seamless swaps are counted.
+const viewActorIdSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER)
 const gridDimensionSchema = z.number().int().min(GRID_MIN).max(GRID_MAX)
 const volumeSchema = z.number().min(0).max(1)
+
+/**
+ * How the wall-side speaker control relates to the staging/control window.
+ * `stage` follows the existing staging audio state, while the other values are
+ * local wall overrides that deliberately do not rewrite that staging state.
+ */
+export const wallAudioModeSchema = z.enum(['stage', 'muted', 'unmuted'])
+export type WallAudioMode = z.infer<typeof wallAudioModeSchema>
+
+/**
+ * Commands accepted from the trusted wall overlay. They use the actor's stable
+ * view id rather than a grid index so a control remains attached to the same
+ * playing view while layouts move or resize it.
+ */
+export const wallControlCommandSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('set-wall-playback'),
+    viewId: viewActorIdSchema,
+    paused: z.boolean(),
+  }),
+  z.object({
+    type: z.literal('set-wall-volume'),
+    viewId: viewActorIdSchema,
+    volume: volumeSchema,
+  }),
+  z.object({
+    type: z.literal('set-wall-audio-mode'),
+    viewId: viewActorIdSchema,
+    mode: wallAudioModeSchema,
+  }),
+])
+export type WallControlCommand = z.infer<typeof wallControlCommandSchema>
 
 /** Longest allowed name for a saved layout preset. */
 export const MAX_LAYOUT_PRESET_NAME_LENGTH = 100
@@ -324,12 +364,16 @@ const viewStateValueSchema = z.union([
 const viewStateSchema = z.object({
   state: viewStateValueSchema,
   context: z.object({
-    id: viewIdxSchema,
+    id: viewActorIdSchema,
     content: viewContentSchema.nullable(),
     info: contentViewInfoSchema.nullable(),
     pos: viewPosSchema.nullable(),
     error: z.string().nullable(),
     volume: volumeSchema,
+    // Optional for backwards compatibility with older control servers. The
+    // desktop fork always emits both values; old snapshots default in the UI.
+    wallAudioMode: wallAudioModeSchema.optional(),
+    isPaused: z.boolean().optional(),
   }),
 })
 

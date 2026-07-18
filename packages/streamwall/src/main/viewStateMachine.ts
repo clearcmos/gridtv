@@ -12,6 +12,7 @@ import {
   ContentViewInfo,
 } from 'streamwall-shared/src/types'
 import { Actor, assign, fromPromise, setup } from 'xstate'
+import { twitchPlayerURL } from '../twitchPlayer'
 import { createSessionHostResolver, ensureValidURL } from '../util'
 import { loadHTML } from './loadHTML'
 import log from './logger'
@@ -49,6 +50,25 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
 }
 
 /**
+ * Preserve the target tile's viewport while a view loads or is parked in the
+ * shared hidden host. Adaptive players such as Twitch use viewport size as an
+ * input to quality selection; giving every hidden view the full wall size made
+ * small tiles begin at unnecessarily high resolutions.
+ */
+function hiddenViewBounds(
+  pos: ViewPos | null,
+  offscreenWin: BrowserWindow,
+): Rectangle {
+  const hostBounds = offscreenWin.getBounds()
+  return {
+    x: 0,
+    y: 0,
+    width: Math.max(1, pos?.width ?? hostBounds.width),
+    height: Math.max(1, pos?.height ?? hostBounds.height),
+  }
+}
+
+/**
  * Turns an arbitrary thrown value into a short, serializable reason that can be
  * shown on the wall overlay and in the control UI.
  */
@@ -70,16 +90,17 @@ const viewStateMachine = setup({
       win: BrowserWindow
       offscreenWin: BrowserWindow
       retry: RetryConfig
-      // Creates and registers a second, hidden WebContentsView (plus its own
-      // offscreen host window) that a content swap can preload in the
-      // background while the current one keeps displaying. See `next` below.
+      twitchPlayer?: boolean
+      // Creates and registers a second, hidden WebContentsView on the shared
+      // offscreen host that a content swap can preload in the background while
+      // the current one keeps displaying. See `next` below.
       createNextView: () => {
         view: WebContentsView
         offscreenWin: BrowserWindow
       }
-      // Tears down a view + its offscreen host window created by
-      // `createNextView` (or the initial one from input), detaching it from
-      // whichever contentView currently holds it.
+      // Tears down a view created by `createNextView` (or the initial one from
+      // input), detaching it from whichever contentView currently holds it.
+      // The shared host window itself remains alive.
       disposeView: (view: WebContentsView, offscreenWin: BrowserWindow) => void
     },
 
@@ -93,6 +114,7 @@ const viewStateMachine = setup({
       options: ContentDisplayOptions | null
       info: ContentViewInfo | null
       retry: RetryConfig
+      twitchPlayer: boolean
       createNextView: () => {
         view: WebContentsView
         offscreenWin: BrowserWindow
@@ -223,11 +245,10 @@ const viewStateMachine = setup({
     },
 
     offscreenView: ({ context }) => {
-      const { view, win, offscreenWin } = context
+      const { view, win, offscreenWin, pos } = context
       win.contentView.removeChildView(view)
       offscreenWin.contentView.addChildView(view)
-      const { width, height } = offscreenWin.getBounds()
-      view.setBounds({ x: 0, y: 0, width, height })
+      view.setBounds(hiddenViewBounds(pos, offscreenWin))
     },
 
     positionView: ({ context }) => {
@@ -251,14 +272,13 @@ const viewStateMachine = setup({
       view.setBounds(pos)
     },
 
-    // Attaches the freshly-created preload view to its own hidden offscreen
-    // window while it loads, mirroring `offscreenView` for the current view.
+    // Attaches the freshly-created preload view to the shared hidden host while
+    // it loads, mirroring `offscreenView` for the current view.
     offscreenNextView: ({ context }) => {
-      const { next } = context
+      const { next, pos } = context
       assert(next)
       next.offscreenWin.contentView.addChildView(next.view)
-      const { width, height } = next.offscreenWin.getBounds()
-      next.view.setBounds({ x: 0, y: 0, width, height })
+      next.view.setBounds(hiddenViewBounds(pos, next.offscreenWin))
     },
 
     // Discards a preload in flight (if any): tears down its view/offscreen
@@ -374,25 +394,30 @@ const viewStateMachine = setup({
   actors: {
     loadPage: fromPromise(
       async ({
-        input: { content, view },
+        input: { content, view, twitchPlayer },
       }: {
-        input: { content: ViewContent | null; view: WebContentsView }
+        input: {
+          content: ViewContent | null
+          view: WebContentsView
+          twitchPlayer: boolean
+        }
       }) => {
         assert(content !== null)
 
         const wc = view.webContents
-        await ensureValidURL(content.url, createSessionHostResolver(wc.session))
+        const targetURL = twitchPlayerURL(content.url, twitchPlayer)
+        await ensureValidURL(targetURL, createSessionHostResolver(wc.session))
         wc.audioMuted = true
 
-        if (/\.m3u8?$/.test(content.url)) {
-          loadHTML(wc, 'playHLS', { query: { src: content.url } })
+        if (/\.m3u8?$/.test(targetURL)) {
+          loadHTML(wc, 'playHLS', { query: { src: targetURL } })
         } else {
           // Do NOT await: the preload sends VIEW_INIT before loadURL resolves
           // (did-finish-load), so awaiting here would strand that event and hang
           // the view in waitForInit. Load failures are surfaced via the
           // webContents 'did-fail-load' listener in StreamWindow; swallow the
           // rejection so it isn't an unhandled promise rejection.
-          wc.loadURL(content.url).catch(() => {})
+          wc.loadURL(targetURL).catch(() => {})
         }
       },
     ),
@@ -401,7 +426,16 @@ const viewStateMachine = setup({
   id: 'view',
   initial: 'empty',
   context: ({
-    input: { id, view, win, offscreenWin, retry, createNextView, disposeView },
+    input: {
+      id,
+      view,
+      win,
+      offscreenWin,
+      retry,
+      twitchPlayer,
+      createNextView,
+      disposeView,
+    },
   }) => ({
     id,
     view,
@@ -415,6 +449,7 @@ const viewStateMachine = setup({
     options: null,
     info: null,
     retry,
+    twitchPlayer: twitchPlayer ?? true,
     error: null,
     retryCount: 0,
     volume: 1,
@@ -547,7 +582,11 @@ const viewStateMachine = setup({
             navigate: {
               invoke: {
                 src: 'loadPage',
-                input: ({ context: { content, view } }) => ({ content, view }),
+                input: ({ context: { content, view, twitchPlayer } }) => ({
+                  content,
+                  view,
+                  twitchPlayer,
+                }),
                 onDone: {
                   target: 'waitForInit',
                 },
@@ -846,6 +885,7 @@ const viewStateMachine = setup({
                           return {
                             content: context.content,
                             view: context.next.view,
+                            twitchPlayer: context.twitchPlayer,
                           }
                         },
                         onDone: {

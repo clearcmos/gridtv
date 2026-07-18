@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import * as Y from 'yjs'
+import { MAX_VIEW_IDX } from './schemas.ts'
 import { isValidStateDocShape } from './stateDoc.ts'
 
 /** Builds a Yjs update from a fresh doc mutated by `mutate`. */
@@ -65,7 +66,7 @@ describe('isValidStateDocShape', () => {
     const doc = makeDoc((d) => {
       const cell = new Y.Map<string | undefined>()
       cell.set('streamId', 'abc')
-      d.getMap('views').set('63', cell)
+      d.getMap('views').set(String(MAX_VIEW_IDX), cell)
     })
     expect(isValidStateDocShape(doc)).toBe(true)
   })

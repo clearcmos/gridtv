@@ -30,7 +30,7 @@
 #active-color = "#fff"
 
 [grid]
-# Number of columns and rows in the stream grid (default: 3x3, each 1-8)
+# Number of columns and rows in the stream grid (default: 3x3, each 1-16)
 #cols = 3
 #rows = 3
 
@@ -66,6 +66,27 @@ json-url = []
 
 # How long (in seconds) a playing view may stall before it is reloaded.
 #stalled-timeout = 30
+
+[media]
+# "shared" reuses one persistent browser cache and login across every stream
+# view (recommended for Twitch walls). Use "isolated" for a fresh, ephemeral
+# session per tile at the cost of duplicate site assets and no shared login.
+#session-mode = "shared"
+
+# Rewrite normal twitch.tv/channel URLs to Twitch's official lightweight player
+# instead of loading the full site (navigation/chat/discovery) in every tile.
+#twitch-player = true
+
+# Fixed Twitch rendition for a dense wall. Use "160p" for very small tiles,
+# "360p" (default), "480p", "720p", or "auto" for Twitch's own ABR choice.
+#twitch-quality = "360p"
+
+# Keep one small WebP poster per stream for seamless stalls/swaps. Set the
+# interval to 0 to disable snapshots entirely. Snapshots are scaled to the
+# smaller of the visible tile width and snapshot-max-width.
+#snapshot-interval = 10
+#snapshot-max-width = 640
+#snapshot-quality = 0.65
 
 [twitch]
 #channel = "woke"

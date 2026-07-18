@@ -1,3 +1,4 @@
+import { GRID_MAX } from 'streamwall-shared'
 import { describe, expect, test } from 'vitest'
 import {
   ConfigError,
@@ -30,6 +31,14 @@ function baseConfig() {
       'stalled-timeout': 30,
     },
     park: { pause: false },
+    media: {
+      'session-mode': 'shared',
+      'twitch-player': true,
+      'twitch-quality': '360p',
+      'snapshot-interval': 10,
+      'snapshot-max-width': 640,
+      'snapshot-quality': 0.65,
+    },
     twitch: {
       channel: null,
       username: null,
@@ -169,10 +178,10 @@ describe('validateConfig', () => {
   })
 
   test('rejects a grid dimension above the supported maximum', () => {
-    // The grid caps must match the WS command schema (GRID_MAX = 8) so a
+    // The grid caps must match the WS command schema so a
     // configured wall can always be targeted and resized by remote commands.
     const config = baseConfig()
-    config.grid.cols = 10
+    config.grid.cols = GRID_MAX + 1
     expect(() => validateConfig(config)).toThrow(ConfigError)
     try {
       validateConfig(config)
@@ -189,8 +198,15 @@ describe('validateConfig', () => {
 
   test('accepts grid dimensions at the maximum', () => {
     const config = baseConfig()
-    config.grid.cols = 8
-    config.grid.rows = 8
+    config.grid.cols = GRID_MAX
+    config.grid.rows = GRID_MAX
+    expect(() => validateConfig(config)).not.toThrow()
+  })
+
+  test('accepts a 10x10 CCTV wall', () => {
+    const config = baseConfig()
+    config.grid.cols = 10
+    config.grid.rows = 10
     expect(() => validateConfig(config)).not.toThrow()
   })
 
@@ -221,6 +237,44 @@ describe('validateConfig', () => {
   test('rejects a fractional retry max-retries', () => {
     const config = baseConfig()
     config.retry['max-retries'] = 2.5
+    expect(() => validateConfig(config)).toThrow(ConfigError)
+  })
+
+  test('accepts isolated media sessions and disabled snapshots', () => {
+    const config = baseConfig()
+    config.media['session-mode'] = 'isolated'
+    config.media['snapshot-interval'] = 0
+    expect(() => validateConfig(config)).not.toThrow()
+  })
+
+  test('rejects an unknown media session mode', () => {
+    const config = baseConfig()
+    config.media['session-mode'] = 'global' as 'shared'
+    expect(() => validateConfig(config)).toThrow(ConfigError)
+  })
+
+  test('accepts automatic Twitch quality and the full-site opt-out', () => {
+    const config = baseConfig()
+    config.media['twitch-player'] = false
+    config.media['twitch-quality'] = 'auto'
+    expect(() => validateConfig(config)).not.toThrow()
+  })
+
+  test('rejects an unknown Twitch quality', () => {
+    const config = baseConfig()
+    config.media['twitch-quality'] = '144p' as '360p'
+    expect(() => validateConfig(config)).toThrow(ConfigError)
+  })
+
+  test('rejects snapshot quality outside 0..1', () => {
+    const config = baseConfig()
+    config.media['snapshot-quality'] = 1.1
+    expect(() => validateConfig(config)).toThrow(ConfigError)
+  })
+
+  test('rejects a non-positive snapshot width', () => {
+    const config = baseConfig()
+    config.media['snapshot-max-width'] = 0
     expect(() => validateConfig(config)).toThrow(ConfigError)
   })
 

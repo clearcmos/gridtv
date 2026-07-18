@@ -87,6 +87,47 @@ function display(actor: ReturnType<typeof makeActor>) {
   actor.send({ type: 'DISPLAY', pos: POS, content: CONTENT })
 }
 
+describe('viewStateMachine hidden viewport sizing', () => {
+  it('loads a view at its target tile size instead of the hidden host size', () => {
+    const setBounds = vi.fn()
+    const view = { setBounds }
+    const removeChildView = vi.fn()
+    const addChildView = vi.fn()
+    const win = { contentView: { removeChildView } }
+    const offscreenWin = {
+      contentView: { addChildView },
+      getBounds: () => ({ x: 0, y: 0, width: 1920, height: 1080 }),
+    }
+    const machine = viewStateMachine.provide({
+      actors: { loadPage: fromPromise(async () => {}) },
+    })
+    const actor = createActor(machine, {
+      input: {
+        id: 1,
+        view: view as never,
+        win: win as never,
+        offscreenWin: offscreenWin as never,
+        retry: makeRetry(),
+        createNextView: noopCreateNextView,
+        disposeView: noopDisposeView,
+      },
+    })
+
+    actor.start()
+    actor.send({ type: 'DISPLAY', pos: POS, content: CONTENT })
+
+    expect(removeChildView).toHaveBeenCalledWith(view)
+    expect(addChildView).toHaveBeenCalledWith(view)
+    expect(setBounds).toHaveBeenCalledWith({
+      x: 0,
+      y: 0,
+      width: POS.width,
+      height: POS.height,
+    })
+    actor.stop()
+  })
+})
+
 // Drive a freshly-displayed view all the way to the running state. The
 // loadPage actor resolves as a microtask, so flush pending timers/promises to
 // let loading.navigate advance to waitForInit before signalling init/loaded.
@@ -748,6 +789,23 @@ describe('viewStateMachine loadPage navigation', () => {
     // (see #25). It now lives in mediaPreload.ts instead, so navigate
     // should not touch executeJavaScript at all.
     expect(executeJavaScript).not.toHaveBeenCalled()
+  })
+
+  it('uses the lightweight Twitch player for a normal channel URL', async () => {
+    const { actor, loadURL } = makeActorWithRealLoadPage(makeRetry())
+    const twitchContent = {
+      url: 'https://www.twitch.tv/some_channel',
+      kind: 'video' as const,
+    }
+    actor.start()
+    actor.send({ type: 'DISPLAY', pos: POS, content: twitchContent })
+
+    await vi.waitFor(() => expect(loadURL).toHaveBeenCalled())
+
+    const target = new URL(loadURL.mock.calls[0][0])
+    expect(target.origin).toBe('https://player.twitch.tv')
+    expect(target.searchParams.get('channel')).toBe('some_channel')
+    expect(target.searchParams.get('parent')).toBe('player.twitch.tv')
   })
 })
 

@@ -38,7 +38,7 @@ Under the hood, think of Streamwall as a specialized web browser for mosaicing v
 
 ## Features
 
-- **Resizable grid** — arrange streams in an NxN grid; resize it at runtime from the control UI (column/row presets or exact counts), no restart required.
+- **Resizable grid** — arrange streams in a grid up to 16×16 (256 logical cells); resize it at runtime from the control UI (dense presets or exact counts), no restart required.
 - **Drag-to-place layout** — drag a tile onto another to swap their positions, or drop a stream from the list straight onto a grid cell.
 - **Per-tile audio** — listen to any single tile's audio at a time, switchable with a click or hotkey, with a per-tile volume slider.
 - **Blur/censor** — blur individual tiles, or trigger a wall-wide [Streamdelay](https://github.com/chromakode/streamdelay) censor mode.
@@ -98,6 +98,55 @@ and console verbosity default to `debug`; set `log.level` in your config
 file (see `example.config.toml`) or pass `--log.level=<level>` on the
 command line to change it. Valid levels, from quietest to loudest: `error`,
 `warn`, `info`, `verbose`, `debug`, `silly`.
+
+### Media scaling
+
+Stream views share one persistent browser session/cache by default. This avoids
+downloading and retaining a separate copy of a site's application shell for
+every tile and lets one operator login apply to all views from the same site.
+Set `media.session-mode = "isolated"` for a unique ephemeral session per tile
+when stronger browsing separation matters more than density.
+
+Normal `https://twitch.tv/<channel>` inputs use Twitch's official lightweight
+player page by default, avoiding a separate copy of Twitch navigation, chat,
+and discovery UI in every tile. The density-oriented default is 360p; set
+`media.twitch-quality` to `160p`, `360p`, `480p`, `720p`, or `auto`. Set
+`media.twitch-player = false` to retain full Twitch channel pages.
+
+For a dense CCTV wall, start with a 4×4 or 5×5 grid and 160p players:
+
+```toml
+[grid]
+cols = 5
+rows = 5
+
+[media]
+twitch-quality = "160p"
+```
+
+The 16×16 grid cap is a layout/protocol limit, not a promise that every machine
+can decode 256 live videos. Available CPU/GPU video-decode capacity, memory,
+bandwidth, and Twitch connection behavior determine the practical ceiling.
+
+Poster snapshots are bounded WebP images taken every 10 seconds, scaled no
+larger than the visible tile or 640 pixels wide. Configure
+`media.snapshot-interval`, `media.snapshot-max-width`, and
+`media.snapshot-quality` in `example.config.toml`; an interval of `0` disables
+snapshots. Stream views also load at their target tile dimensions, and direct
+HLS inputs cap automatic quality selection to the player size.
+
+### Wall hover controls
+
+Hover a tile in the actual **Streamwall** video window to pause or play that
+stream, change its volume, or cycle its speaker through three modes:
+
+- **Stage** (blue) follows the staging/control window's existing audio choice.
+- **Muted** (red) locally mutes the tile regardless of the staging choice.
+- **Unmuted** (green) locally enables the tile and mixes it with every other
+  wall tile in Unmuted mode.
+
+Wall audio overrides do not rewrite the staging state, so returning a tile to
+Stage immediately restores the staging operator's latest choice.
 
 ### Telemetry
 

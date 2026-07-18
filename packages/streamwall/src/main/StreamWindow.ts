@@ -22,11 +22,19 @@ import {
   ViewContent,
   ViewContentMap,
   ViewState,
+  wallControlCommandSchema,
+  type WallAudioMode,
+  type WallControlCommand,
 } from 'streamwall-shared'
 import { createActor, EventFrom, SnapshotFrom } from 'xstate'
+import {
+  DEFAULT_STREAM_MEDIA_CONFIG,
+  type StreamMediaConfig,
+} from '../mediaConfig'
+import { twitchQualityArgument } from '../twitchPlayer'
 import { devServerOrigin, loadHTML } from './loadHTML'
 import { secureStreamView } from './navigationSecurity'
-import { allocateViewPartition, hardenSession } from './partitions'
+import { hardenSession, streamViewPartition } from './partitions'
 import viewStateMachine, {
   DEFAULT_RETRY_CONFIG,
   RetryConfig,
@@ -57,10 +65,19 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   // #374): trades the parked view's instant-resume smoothness for lower
   // CPU/network usage while it's hidden behind a fullscreen expansion.
   pauseParkedViews: boolean
+  mediaConfig: StreamMediaConfig
   win: BrowserWindow
+  // One hidden host is enough for every view being loaded or temporarily
+  // parked. Upstream created a BrowserWindow (and blank renderer) per stream.
+  offscreenWin: BrowserWindow
   backgroundView: WebContentsView
   overlayView: WebContentsView
   views: Map<number, ViewActor>
+  // Wall-side speaker overrides are deliberately kept outside the view state
+  // machine: that machine continues tracking the staging window's audio state,
+  // so switching an override back to `stage` can immediately restore whatever
+  // the operator most recently selected there.
+  wallAudioModes: Map<number, WallAudioMode>
   // Actors temporarily excluded from `views` (and therefore from
   // `emitState()`) while a fullscreen expansion hides them behind the
   // expanded view, kept alive instead of torn down so a later collapse can
@@ -80,12 +97,15 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     config: StreamWindowConfig,
     retryConfig: RetryConfig = DEFAULT_RETRY_CONFIG,
     pauseParkedViews = false,
+    mediaConfig: StreamMediaConfig = DEFAULT_STREAM_MEDIA_CONFIG,
   ) {
     super()
     this.config = config
     this.retryConfig = retryConfig
     this.pauseParkedViews = pauseParkedViews
+    this.mediaConfig = mediaConfig
     this.views = new Map()
+    this.wallAudioModes = new Map()
     this.parkedViews = new Map()
     this.viewsByWebContentsId = new Map()
 
@@ -134,6 +154,18 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     win.on('resize', () => this.handleResize())
 
     this.win = win
+
+    const offscreenWin = new BrowserWindow({
+      width,
+      height,
+      show: false,
+    })
+    this.offscreenWin = offscreenWin
+    win.on('closed', () => {
+      if (!offscreenWin.isDestroyed()) {
+        offscreenWin.destroy()
+      }
+    })
 
     const backgroundView = new WebContentsView({
       webPreferences: {
@@ -196,7 +228,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
           ? 'NEXT_VIEW_INIT'
           : 'VIEW_INIT',
       })
-      return { content, options, volume }
+      return { content, options, volume, media: this.mediaConfig }
     })
     ipcMain.on('view-loaded', (ev) => {
       const view = this.viewsByWebContentsId.get(ev.sender.id)
@@ -235,6 +267,20 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     ipcMain.on('devtools-overlay', () => {
       overlayView.webContents.openDevTools()
     })
+    ipcMain.on('wall-control', (ev, rawCommand: unknown) => {
+      // Only the trusted local overlay may control wall media. Stream pages
+      // use separate WebContentsViews and cannot reach this channel through
+      // the layer preload bridge.
+      if (ev.sender !== overlayView.webContents) {
+        return
+      }
+      const command = wallControlCommandSchema.safeParse(rawCommand)
+      if (!command.success) {
+        console.warn('Ignoring invalid wall control command')
+        return
+      }
+      this.handleWallControl(command.data)
+    })
   }
 
   handleResize() {
@@ -246,35 +292,33 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.config.height = height
     this.backgroundView.setBounds({ x: 0, y: 0, width, height })
     this.overlayView.setBounds({ x: 0, y: 0, width, height })
+    this.offscreenWin.setContentSize(width, height)
     // Let the main process re-layout the stream views and rebroadcast state
     // (config is shared by reference, so the overlay gets the new dimensions).
     this.emit('resize')
   }
 
   /**
-   * Creates a bare WebContentsView + its dedicated hidden host window (used
-   * while the view is loading, before it's positioned in the wall), with no
-   * actor/routing attached yet. Shared by `createView()` (the initial view
-   * for a new cell) and `createNextView` (a preloaded view for a content swap
-   * on an already-running cell -- see viewStateMachine's `running.swap`).
+   * Creates a bare WebContentsView and returns the shared hidden host used
+   * while views load or are parked, with no actor/routing attached yet.
    */
   private createRawView(): {
     view: WebContentsView
     offscreenWin: BrowserWindow
   } {
     const {
-      config: { width, height, backgroundColor },
+      config: { backgroundColor },
     } = this
-    // Give every view its own unique, ephemeral partition so that streams can
-    // not share cookies/localStorage/cache with each other, the browse window,
-    // or anything persisted to disk.
     const view = new WebContentsView({
       webPreferences: {
         preload: path.join(__dirname, 'mediaPreload.js'),
         nodeIntegration: false,
         contextIsolation: true,
         backgroundThrottling: false,
-        partition: allocateViewPartition(),
+        partition: streamViewPartition(this.mediaConfig.sessionMode),
+        additionalArguments: [
+          twitchQualityArgument(this.mediaConfig.twitchQuality),
+        ],
       },
     })
     hardenSession(view.webContents.session, {
@@ -289,14 +333,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     // escapes while still allowing the page to reload itself.
     secureStreamView(view.webContents)
 
-    // Hidden window used for loading the view before it's positioned in the wall.
-    const offscreenWin = new BrowserWindow({
-      width,
-      height,
-      show: false,
-    })
-
-    return { view, offscreenWin }
+    return { view, offscreenWin: this.offscreenWin }
   }
 
   /**
@@ -337,17 +374,16 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     )
   }
 
-  /** Tears down a view + host window created by `createRawView()`. */
+  /** Tears down a view while retaining the app-wide shared hidden host. */
   private disposeRawView(view: WebContentsView, offscreenWin: BrowserWindow) {
     this.viewsByWebContentsId.delete(view.webContents.id)
     offscreenWin.contentView.removeChildView(view)
     this.win.contentView.removeChildView(view)
     view.webContents.close()
-    offscreenWin.destroy()
   }
 
   /**
-   * Moves a running actor's view off the visible wall onto its own offscreen
+   * Moves a running actor's view off the visible wall onto the shared offscreen
    * host window, without touching the actor's state. Used to keep a
    * non-focused view alive (rather than torn down) across a fullscreen
    * expansion: `setViews`' own matchers can then find and reposition it again
@@ -356,10 +392,14 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
    * action, which the actor itself uses while a fresh view is loading.
    */
   private hideView(actor: ViewActor) {
-    const { view, win, offscreenWin } = actor.getSnapshot().context
+    const { view, win, offscreenWin, pos } = actor.getSnapshot().context
     win.contentView.removeChildView(view)
     offscreenWin.contentView.addChildView(view)
-    const { width, height } = offscreenWin.getBounds()
+    const hostBounds = offscreenWin.getBounds()
+    // Keep the hidden viewport at its tile size so adaptive players do not
+    // jump to wall-sized/high-resolution variants while parked.
+    const width = Math.max(1, pos?.width ?? hostBounds.width)
+    const height = Math.max(1, pos?.height ?? hostBounds.height)
     view.setBounds({ x: 0, y: 0, width, height })
     if (this.pauseParkedViews) {
       actor.send({ type: 'PAUSE' })
@@ -391,6 +431,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         win,
         offscreenWin,
         retry: this.retryConfig,
+        twitchPlayer: this.mediaConfig.twitchPlayer,
         createNextView,
         disposeView: (v: WebContentsView, w: BrowserWindow) =>
           this.disposeRawView(v, w),
@@ -404,6 +445,10 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         return
       }
       lastSnapshot = snapshot
+      // Actor entry actions apply the staging mute state. Reapply any wall
+      // override after every transition, including a seamless content swap
+      // that promotes a new WebContentsView into this actor.
+      this.applyWallAudioMode(actor)
       this.emitState()
     })
 
@@ -424,6 +469,8 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
           pos: context.pos,
           error: context.error,
           volume: context.volume,
+          wallAudioMode: this.wallAudioModes.get(context.id) ?? 'stage',
+          isPaused: context.desiredPaused,
         },
       } satisfies ViewState
     })
@@ -568,6 +615,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         this.parkedViews.set(view.getSnapshot().context.id, view)
         continue
       }
+      const viewId = view.getSnapshot().context.id
       view.stop()
       const {
         view: contentView,
@@ -583,6 +631,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (next) {
         disposeView(next.view, next.offscreenWin)
       }
+      this.wallAudioModes.delete(viewId)
     }
     this.views = newViews
     this.emitState()
@@ -601,6 +650,10 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
           ? (context.pos?.spaces.includes(viewIdx) ?? false)
           : false
       view.send({ type: isSelectedView ? 'UNMUTE' : 'MUTE' })
+      // A background staging view can intentionally ignore MUTE without an
+      // actor transition; apply explicitly instead of relying only on the
+      // actor subscription above.
+      this.applyWallAudioMode(view)
     }
   }
 
@@ -620,9 +673,13 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   }
 
   setViewBackgroundListening(viewIdx: number, listening: boolean) {
-    this.sendViewEvent(viewIdx, {
+    const view = this.findViewByIdx(viewIdx)
+    view?.send({
       type: listening ? 'BACKGROUND' : 'UNBACKGROUND',
     })
+    if (view) {
+      this.applyWallAudioMode(view)
+    }
   }
 
   setViewBlurred(viewIdx: number, blurred: boolean) {
@@ -631,6 +688,54 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
 
   setViewVolume(viewIdx: number, volume: number) {
     this.sendViewEvent(viewIdx, { type: 'SET_VOLUME', volume })
+  }
+
+  /** Apply one wall speaker mode without altering the staging audio state. */
+  applyWallAudioMode(view: ViewActor) {
+    const { id, desiredAudio, view: contentView } = view.getSnapshot().context
+    const mode = this.wallAudioModes.get(id) ?? 'stage'
+    const shouldMute =
+      mode === 'muted' ||
+      (mode === 'stage' && (desiredAudio ?? 'muted') === 'muted')
+    if (contentView?.webContents) {
+      contentView.webContents.audioMuted = shouldMute
+    }
+  }
+
+  setWallAudioMode(viewId: number, mode: WallAudioMode) {
+    const view = this.views.get(viewId)
+    if (!view) {
+      return
+    }
+    if (mode === 'stage') {
+      this.wallAudioModes.delete(viewId)
+    } else {
+      this.wallAudioModes.set(viewId, mode)
+    }
+    this.applyWallAudioMode(view)
+    this.emitState()
+  }
+
+  setWallPlayback(viewId: number, paused: boolean) {
+    this.views.get(viewId)?.send({ type: paused ? 'PAUSE' : 'RESUME' })
+  }
+
+  setWallVolume(viewId: number, volume: number) {
+    this.views.get(viewId)?.send({ type: 'SET_VOLUME', volume })
+  }
+
+  handleWallControl(command: WallControlCommand) {
+    switch (command.type) {
+      case 'set-wall-playback':
+        this.setWallPlayback(command.viewId, command.paused)
+        break
+      case 'set-wall-volume':
+        this.setWallVolume(command.viewId, command.volume)
+        break
+      case 'set-wall-audio-mode':
+        this.setWallAudioMode(command.viewId, command.mode)
+        break
+    }
   }
 
   reloadView(viewIdx: number) {

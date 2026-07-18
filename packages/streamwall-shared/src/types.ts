@@ -1,7 +1,7 @@
 import type { Delta } from 'jsondiffpatch'
 import type { ViewContent, ViewPos } from './geometry.ts'
 import type { StreamwallRole } from './roles.ts'
-import type { ControlCommand } from './schemas.ts'
+import type { ControlCommand, WallAudioMode } from './schemas.ts'
 
 export interface StreamWindowConfig {
   cols: number
@@ -85,6 +85,10 @@ export interface ViewState {
     // the mute/listening state: it is the level applied once the tile is
     // unmuted.
     volume: number
+    /** Wall-side audio override; absent snapshots are treated as `stage`. */
+    wallAudioMode?: WallAudioMode
+    /** Whether playback was paused from the wall-side hover controls. */
+    isPaused?: boolean
   }
 }
 

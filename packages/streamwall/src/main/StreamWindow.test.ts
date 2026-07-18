@@ -47,6 +47,7 @@ function makeStreamWindow(config: StreamWindowConfig) {
   >
   sw.config = config
   sw.parkedViews = new Map()
+  sw.wallAudioModes = new Map()
   sw.pauseParkedViews = false
   return sw
 }
@@ -154,6 +155,158 @@ describe('StreamWindow.emitState', () => {
         },
       ],
     ])
+  })
+
+  it('includes wall audio mode and paused state in the emitted view context', () => {
+    const sw = makeStreamWindow(makeConfig())
+    sw.wallAudioModes.set(1, 'unmuted')
+    sw.views = new Map([
+      [
+        1,
+        makeFakeViewActorWithSnapshot({
+          value: 'empty',
+          context: {
+            id: 1,
+            content: null,
+            info: null,
+            pos: null,
+            error: null,
+            volume: 0.6,
+            desiredPaused: true,
+          },
+        }),
+      ],
+    ])
+    const emitted: unknown[] = []
+    sw.on('state', (states) => emitted.push(states))
+
+    sw.emitState()
+
+    expect(emitted).toEqual([
+      [
+        {
+          state: 'empty',
+          context: expect.objectContaining({
+            wallAudioMode: 'unmuted',
+            isPaused: true,
+          }),
+        },
+      ],
+    ])
+  })
+})
+
+function makeWallControlActor({
+  id = 17,
+  desiredAudio = 'muted' as 'muted' | 'listening' | 'background',
+} = {}) {
+  const webContents = { audioMuted: true }
+  const context = {
+    id,
+    desiredAudio,
+    desiredPaused: false,
+    view: { webContents },
+  }
+  const send = vi.fn()
+  const actor = {
+    getSnapshot: () => ({ context }),
+    send,
+  } as unknown as ReturnType<typeof StreamWindow.prototype.createView>
+  return { actor, context, send, webContents }
+}
+
+describe('StreamWindow wall media controls', () => {
+  it('Stage mode follows the staging audio state', () => {
+    const sw = makeStreamWindow(makeConfig())
+    const { actor, context, webContents } = makeWallControlActor()
+
+    sw.applyWallAudioMode(actor)
+    expect(webContents.audioMuted).toBe(true)
+
+    context.desiredAudio = 'background'
+    sw.applyWallAudioMode(actor)
+    expect(webContents.audioMuted).toBe(false)
+  })
+
+  it('Muted and Unmuted override staging without rewriting it', () => {
+    const sw = makeStreamWindow(makeConfig())
+    const { actor, context, webContents } = makeWallControlActor()
+    sw.views = new Map([[17, actor]])
+
+    sw.setWallAudioMode(17, 'unmuted')
+    expect(webContents.audioMuted).toBe(false)
+    expect(context.desiredAudio).toBe('muted')
+
+    context.desiredAudio = 'listening'
+    sw.setWallAudioMode(17, 'muted')
+    expect(webContents.audioMuted).toBe(true)
+    expect(context.desiredAudio).toBe('listening')
+
+    sw.setWallAudioMode(17, 'stage')
+    expect(webContents.audioMuted).toBe(false)
+    expect(context.desiredAudio).toBe('listening')
+  })
+
+  it('keeps every wall-Unmuted tile audible simultaneously', () => {
+    const sw = makeStreamWindow(makeConfig())
+    const first = makeWallControlActor({ id: 17 })
+    const second = makeWallControlActor({ id: 18 })
+    sw.views = new Map([
+      [17, first.actor],
+      [18, second.actor],
+    ])
+
+    sw.setWallAudioMode(17, 'unmuted')
+    sw.setWallAudioMode(18, 'unmuted')
+
+    expect(first.webContents.audioMuted).toBe(false)
+    expect(second.webContents.audioMuted).toBe(false)
+    expect(first.context.desiredAudio).toBe('muted')
+    expect(second.context.desiredAudio).toBe('muted')
+  })
+
+  it('routes playback and volume commands to the selected view actor', () => {
+    const sw = makeStreamWindow(makeConfig())
+    const { actor, send } = makeWallControlActor()
+    sw.views = new Map([[17, actor]])
+
+    sw.handleWallControl({
+      type: 'set-wall-playback',
+      viewId: 17,
+      paused: true,
+    })
+    sw.handleWallControl({
+      type: 'set-wall-volume',
+      viewId: 17,
+      volume: 0.4,
+    })
+
+    expect(send).toHaveBeenCalledWith({ type: 'PAUSE' })
+    expect(send).toHaveBeenCalledWith({ type: 'SET_VOLUME', volume: 0.4 })
+  })
+
+  it('ignores commands for a stale view id', () => {
+    const sw = makeStreamWindow(makeConfig())
+    const { actor, send } = makeWallControlActor()
+    sw.views = new Map([[17, actor]])
+
+    sw.handleWallControl({
+      type: 'set-wall-playback',
+      viewId: 99,
+      paused: true,
+    })
+    sw.handleWallControl({
+      type: 'set-wall-volume',
+      viewId: 99,
+      volume: 0.4,
+    })
+    sw.handleWallControl({
+      type: 'set-wall-audio-mode',
+      viewId: 99,
+      mode: 'unmuted',
+    })
+
+    expect(send).not.toHaveBeenCalled()
   })
 })
 
@@ -583,7 +736,7 @@ describe('StreamWindow.setViews parking unused views during a fullscreen expansi
     // The non-focused actor survives instead of being stopped/disposed...
     expect(other.stop).not.toHaveBeenCalled()
     expect(other.disposeView).not.toHaveBeenCalled()
-    // ...but is moved off the visible wall onto its own offscreen host so it
+    // ...but is moved off the visible wall onto the shared offscreen host so it
     // does not render on top of (or behind) the expanded view.
     expect(other.removeChildViewOnWin).toHaveBeenCalled()
     expect(other.addChildViewOnOffscreen).toHaveBeenCalled()
@@ -899,7 +1052,7 @@ function fireDidFailLoad(
 }
 
 describe('StreamWindow view registration and disposal', () => {
-  it('disposeRawView closes the webContents, destroys the offscreen window, and deregisters routing', () => {
+  it('disposeRawView closes the webContents, retains the shared offscreen window, and deregisters routing', () => {
     const sw = makeStreamWindow(makeConfig())
     const removeChildViewOnWin = vi.fn()
     sw.win = {
@@ -924,7 +1077,7 @@ describe('StreamWindow view registration and disposal', () => {
     expect(removeChildViewOnOffscreen).toHaveBeenCalledWith(view)
     expect(removeChildViewOnWin).toHaveBeenCalledWith(view)
     expect(close).toHaveBeenCalledTimes(1)
-    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(destroy).not.toHaveBeenCalled()
     expect(sw.viewsByWebContentsId.has(7)).toBe(false)
   })
 

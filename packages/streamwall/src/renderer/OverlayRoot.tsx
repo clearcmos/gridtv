@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'preact/hooks'
-import { StreamwallState, type ViewPos } from 'streamwall-shared'
+import {
+  StreamwallState,
+  type ViewPos,
+  type WallControlCommand,
+} from 'streamwall-shared'
 import { styled } from 'styled-components'
 import { matchesState } from 'xstate'
 import packageInfo from '../../package.json'
 import { LAYER_FRAME_SANDBOX } from './layerFrameSandbox'
 import { OverlayViewTile } from './OverlayViewTile'
+import { WallMediaControls } from './WallMediaControls'
 
 // Extracted from overlay.tsx so it can be rendered and tested in isolation,
 // without pulling in the module-level `render(<App />, document.body)` call.
@@ -12,7 +17,10 @@ export function Overlay({
   config,
   views,
   streams,
-}: Pick<StreamwallState, 'config' | 'views' | 'streams'>) {
+  onControl,
+}: Pick<StreamwallState, 'config' | 'views' | 'streams'> & {
+  onControl: (command: WallControlCommand) => void
+}) {
   const { width, height, activeColor } = config
   // Keep error views on the wall (instead of leaving a silent black cell) so the
   // failure and its reason are visible; they are rendered as an error tile below.
@@ -39,6 +47,10 @@ export function Overlay({
           'displaying.running.audio.background',
           state,
         )
+        const wallAudioMode = context.wallAudioMode ?? 'stage'
+        const isAudible =
+          wallAudioMode === 'unmuted' ||
+          (wallAudioMode === 'stage' && (isListening || isBackgroundListening))
         const isBlurred = matchesState(
           'displaying.running.video.blurred',
           state,
@@ -53,7 +65,7 @@ export function Overlay({
             $windowWidth={width}
             $windowHeight={height}
             $activeColor={activeColor}
-            $isListening={isListening}
+            $isListening={isAudible}
             $isError={isError}
           >
             <OverlayViewTile
@@ -61,11 +73,18 @@ export function Overlay({
               data={data}
               isError={isError}
               errorReason={context.error}
-              isListening={isListening}
-              isBackgroundListening={isBackgroundListening}
+              isListening={isAudible}
+              isBackgroundListening={false}
               isBlurred={isBlurred}
               isLoading={isLoading}
               activeColor={activeColor}
+            />
+            <WallMediaControls
+              viewId={context.id}
+              isPaused={context.isPaused ?? false}
+              volume={context.volume}
+              audioMode={wallAudioMode}
+              onControl={onControl}
             />
           </SpaceBorder>
         )
@@ -107,6 +126,7 @@ function VersionFooter() {
 
 const OverlayContainer = styled.div`
   overflow: hidden;
+  pointer-events: none;
 `
 
 const SpaceBorder = styled.div.attrs<{
@@ -139,8 +159,16 @@ const SpaceBorder = styled.div.attrs<{
   box-shadow: ${({ $isListening, $activeColor }) =>
     $isListening ? `0 0 10px ${$activeColor} inset` : 'none'};
   box-sizing: border-box;
-  pointer-events: none;
+  container-type: size;
+  pointer-events: auto;
   user-select: none;
+
+  &:hover [data-wall-media-controls],
+  &:focus-within [data-wall-media-controls] {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+  }
 `
 
 const VersionText = styled.div<{ $isShowing: boolean }>`
@@ -159,6 +187,7 @@ const VersionText = styled.div<{ $isShowing: boolean }>`
   border-bottom-left-radius: 4px;
   opacity: ${({ $isShowing }) => ($isShowing ? '.65' : '.35')};
   transition: ease-out 500ms all;
+  pointer-events: none;
 `
 
 const OverlayIFrame = styled.iframe`

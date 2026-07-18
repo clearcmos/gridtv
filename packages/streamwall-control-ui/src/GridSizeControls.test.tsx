@@ -85,6 +85,18 @@ describe('GridSizeControls presets', () => {
     expect(onSetGridSize).toHaveBeenCalledWith(4, 3)
   })
 
+  test('offers a 10x10 dense-wall preset', () => {
+    const onSetGridSize = vi.fn()
+    const box = renderControls({ onSetGridSize })
+    const preset = Array.from(box.querySelectorAll('button.preset')).find(
+      (button) => button.textContent === '10×10',
+    ) as HTMLButtonElement
+
+    act(() => preset.click())
+
+    expect(onSetGridSize).toHaveBeenCalledWith(10, 10)
+  })
+
   test('disables preset buttons for a role that cannot mutate the state doc', () => {
     const box = renderControls({ role: 'monitor' })
 
