@@ -2,6 +2,7 @@
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import type {
+  LiveWallSlotState,
   StreamData,
   StreamWindowConfig,
   ViewState,
@@ -82,21 +83,6 @@ function renderOverlay(
   return container
 }
 
-// Walks up from the matched label span to the tile element that is a direct
-// child of the overlay container (i.e. the `SpaceBorder` for that view),
-// rather than stopping at the shared container itself.
-function findTile(root: HTMLDivElement, label: string): Element | undefined {
-  const overlayContainer = root.firstElementChild
-  const span = [...root.querySelectorAll('span')].find(
-    (el) => el.textContent === label,
-  )
-  let node: Element | null = span ?? null
-  while (node && node.parentElement !== overlayContainer) {
-    node = node.parentElement
-  }
-  return node ?? undefined
-}
-
 // Each active view's border/tile used to be rendered without a `key`, so
 // Preact matched them purely by position. When an earlier view disappears,
 // every later view's position shifts down a slot and Preact grafts the
@@ -109,8 +95,8 @@ describe('overlay view identity across a shrinking view list', () => {
       [makeView(0, 'view-0'), makeView(1, 'view-1')],
       streams,
     )
-    const tileBefore = findTile(root, 'view-1')
-    expect(tileBefore, 'expected to find a tile for view-1').not.toBeUndefined()
+    const tileBefore = root.querySelector('[data-view-idx="1"]')
+    expect(tileBefore, 'expected to find a tile for view-1').not.toBeNull()
 
     act(() => {
       render(
@@ -125,11 +111,8 @@ describe('overlay view identity across a shrinking view list', () => {
       )
     })
 
-    const tileAfter = findTile(root, 'view-1')
-    expect(
-      tileAfter,
-      'expected to still find a tile for view-1',
-    ).not.toBeUndefined()
+    const tileAfter = root.querySelector('[data-view-idx="1"]')
+    expect(tileAfter, 'expected to still find a tile for view-1').not.toBeNull()
     expect(tileAfter).toBe(tileBefore)
   })
 })
@@ -230,6 +213,150 @@ describe('self-contained wall controls', () => {
       type: 'set-wall-stream',
       viewIdx: 1,
       username: 'lacy',
+    })
+  })
+
+  test('shows an offline assignment without rendering a player control bar', () => {
+    const stream: StreamData = {
+      _id: 'twitch-offline_name',
+      _dataSource: 'custom',
+      kind: 'video',
+      link: 'https://www.twitch.tv/offline_name',
+      label: 'OfflineName',
+    }
+    const wallSlots: LiveWallSlotState[] = [
+      {
+        viewIdx: 0,
+        streamId: stream._id,
+        twitchStatus: 'offline',
+      },
+    ]
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[]}
+          streams={[stream]}
+          wallSlots={wallSlots}
+          fullscreenViewIdx={null}
+          onControl={() => {}}
+        />,
+        container!,
+      )
+    })
+
+    expect(container.querySelector('[data-testid="offline-tile"]')).not.toBe(
+      null,
+    )
+    expect(container.textContent).toContain('OfflineName')
+    expect(container.textContent).toContain('Offline')
+    expect(container.querySelector('[data-wall-media-controls]')).toBe(null)
+  })
+
+  test('double-click expands a stream and Escape restores the wall', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[makeView(0, 'view-0')]}
+          streams={[makeStream('view-0')]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+
+    act(() => {
+      container!
+        .querySelector('[data-wall-tile]')!
+        .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    })
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'set-wall-fullscreen',
+      viewIdx: 0,
+      fullscreen: true,
+    })
+
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[makeView(0, 'view-0')]}
+          streams={[makeStream('view-0')]}
+          fullscreenViewIdx={0}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    act(() => {
+      container!
+        .querySelector('[data-wall-tile]')!
+        .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    })
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-fullscreen',
+      viewIdx: 0,
+      fullscreen: false,
+    })
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    })
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-fullscreen',
+      viewIdx: 0,
+      fullscreen: false,
+    })
+  })
+
+  test('dragging one tile onto another requests a swap', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(2)}
+          views={[makeView(0, 'view-0'), makeView(1, 'view-1')]}
+          streams={[makeStream('view-0'), makeStream('view-1')]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    const dataTransfer = new DataTransfer()
+    const dispatchDrag = (element: Element, type: string) => {
+      const event = new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+      })
+      // happy-dom exposes DataTransfer but does not currently copy it from
+      // DragEventInit, so attach the same browser property explicitly.
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+      element.dispatchEvent(event)
+    }
+    const source = container.querySelector('[data-view-idx="0"]')!
+    const target = container.querySelector('[data-view-idx="1"]')!
+
+    // happy-dom omits native `ondrag*` properties, so Preact retains JSX's
+    // event casing when it installs these listeners in this test environment.
+    act(() => dispatchDrag(source, 'DragStart'))
+    expect(dataTransfer.getData('text/plain')).toBe('0')
+    act(() => dispatchDrag(target, 'DragEnter'))
+    act(() => dispatchDrag(target, 'Drop'))
+
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'swap-wall-streams',
+      fromViewIdx: 0,
+      toViewIdx: 1,
     })
   })
 })

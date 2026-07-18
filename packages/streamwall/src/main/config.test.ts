@@ -34,7 +34,7 @@ function baseConfig() {
     media: {
       'session-mode': 'shared',
       'twitch-player': true,
-      'twitch-quality': '360p',
+      'twitch-quality': 'source',
       'snapshot-interval': 10,
       'snapshot-max-width': 640,
       'snapshot-quality': 0.65,
@@ -257,6 +257,12 @@ describe('validateConfig', () => {
     const config = baseConfig()
     config.media['twitch-player'] = false
     config.media['twitch-quality'] = 'auto'
+    expect(() => validateConfig(config)).not.toThrow()
+  })
+
+  test('accepts highest/source Twitch quality', () => {
+    const config = baseConfig()
+    config.media['twitch-quality'] = 'source'
     expect(() => validateConfig(config)).not.toThrow()
   })
 

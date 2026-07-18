@@ -166,6 +166,8 @@ describe('wallControlCommandSchema', () => {
       },
       { type: 'set-wall-tile-count', count: 7 },
       { type: 'set-wall-stream', viewIdx: 2, username: 'lacy' },
+      { type: 'set-wall-fullscreen', viewIdx: 2, fullscreen: true },
+      { type: 'swap-wall-streams', fromViewIdx: 2, toViewIdx: 5 },
     ]) {
       expect(wallControlCommandSchema.safeParse(command).success).toBe(true)
     }
@@ -186,6 +188,8 @@ describe('wallControlCommandSchema', () => {
       { type: 'set-wall-tile-count', count: 0 },
       { type: 'set-wall-tile-count', count: 10 },
       { type: 'set-wall-stream', viewIdx: 9, username: 'lacy' },
+      { type: 'set-wall-fullscreen', viewIdx: 9, fullscreen: true },
+      { type: 'swap-wall-streams', fromViewIdx: -1, toViewIdx: 2 },
       { type: 'unknown-wall-command', viewId: 1 },
     ]) {
       expect(wallControlCommandSchema.safeParse(command).success).toBe(false)
@@ -779,6 +783,23 @@ describe('streamwallStateSchema', () => {
       },
     }
     expect(streamwallStateSchema.safeParse(state).success).toBe(true)
+  })
+
+  test('accepts bounded wall-slot Twitch availability', () => {
+    const state = {
+      ...VALID_STATE,
+      wallSlots: [
+        { viewIdx: 0, streamId: 'twitch-lacy', twitchStatus: 'online' },
+        { viewIdx: 1, streamId: 'twitch-away', twitchStatus: 'offline' },
+      ],
+    }
+    expect(streamwallStateSchema.safeParse(state).success).toBe(true)
+    expect(
+      streamwallStateSchema.safeParse({
+        ...state,
+        wallSlots: [{ viewIdx: 9, twitchStatus: 'sleeping' }],
+      }).success,
+    ).toBe(false)
   })
 
   test('parsed state is assignable to StreamwallState at compile time', () => {

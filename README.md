@@ -43,6 +43,8 @@ Under the hood, think of Streamwall as a specialized web browser for mosaicing v
 - **Exact 1–9 tile wall** — press **F1** and click a number; every count fills the window edge-to-edge without an unused grid cell.
 - **Direct stream replacement** — click the edit/plus icon in any tile and type a Twitch username; a full URL is optional.
 - **Per-tile audio mixing** — every tile can be muted or unmuted independently, so multiple streams can play audio simultaneously, each with its own volume slider.
+- **Fast wall interaction** — double-click a playing tile to expand it, press Escape or double-click again to restore the wall, and drag one tile onto another to swap them.
+- **Offline-aware restore** — saved Twitch assignments are checked together on startup; offline channels show a replaceable placeholder without creating a failing player.
 - **Blur/censor** — blur individual tiles, or trigger a wall-wide [Streamdelay](https://github.com/chromakode/streamdelay) censor mode.
 - **Dark mode** — light, dark, or system-matched theme in the control UI.
 - **Remote control with roles** — an optional web-based control server lets operators run the wall from a browser, with **admin**, **operator**, and **monitor** roles gated by invite links.
@@ -109,9 +111,12 @@ when stronger browsing separation matters more than density.
 
 Normal `https://twitch.tv/<channel>` inputs use Twitch's official lightweight
 player page by default, avoiding a separate copy of Twitch navigation, chat,
-and discovery UI in every tile. The density-oriented default is 360p; set
-`media.twitch-quality` to `160p`, `360p`, `480p`, `720p`, or `auto`. Set
-`media.twitch-player = false` to retain full Twitch channel pages.
+and discovery UI in every tile. The default is `source`, Twitch's highest
+available pass-through rendition (normally 1080p when the broadcaster offers
+it, otherwise their highest source such as 720p). Set `media.twitch-quality`
+to `160p`, `360p`, `480p`, `720p`, or `auto` when you prefer lower decoder and
+bandwidth use. Set `media.twitch-player = false` to retain full Twitch channel
+pages.
 
 For a dense nine-tile CCTV wall, 160p players reduce bandwidth and decoder
 pressure:
@@ -140,7 +145,13 @@ HLS inputs cap automatic quality selection to the player size.
 ### Wall hover controls
 
 Hover a tile to pause/play it, adjust its volume, or toggle it between
-**Muted** and **Unmuted**. Every unmuted tile is mixed simultaneously.
+**Muted** and **Unmuted**. Every unmuted tile is mixed simultaneously. The
+wall does not place a permanent platform/name badge over a healthy video.
+
+Double-click a playing tile to fill the wall. Double-click it again or press
+**Escape** to return to the grid. Click and hold on a tile, then drag it onto
+another tile to swap their positions; mute, volume, and playback settings move
+with their streams.
 
 Press **F1** to choose an exact tile count from 1 through 9. Shrinking keeps the
 first active streams in visual order and closes every player that no longer
@@ -150,6 +161,12 @@ usernames such as `lacy`, `@lacy`, and full channel URLs are all accepted.
 Channel suggestions are requested only after 350 ms without another keystroke,
 require at least two characters, return at most eight names, and are cached for
 one minute. Search failure never prevents entering an exact username.
+
+On every launch, assigned Twitch usernames are checked in one batched request
+before players are created. A channel confirmed offline remains assigned and
+is shown as **Offline**, where its edit button can replace it. If Twitch status
+cannot be checked, the tile says **Status unavailable** and is also not loaded,
+avoiding a misleading media/network failure.
 
 Tile count, assignments, mute state, volume, and paused state are written while
 the app runs. Pending writes are flushed before quit. Custom Twitch sources use

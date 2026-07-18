@@ -78,9 +78,10 @@ json-url = []
 # instead of loading the full site (navigation/chat/discovery) in every tile.
 #twitch-player = true
 
-# Fixed Twitch rendition for a dense wall. Use "160p" for very small tiles,
-# "360p" (default), "480p", "720p", or "auto" for Twitch's own ABR choice.
-#twitch-quality = "360p"
+# Twitch source/pass-through quality is the default (normally 1080p when the
+# broadcaster provides it, otherwise their highest rendition such as 720p).
+# Use "160p", "360p", "480p", "720p", or "auto" to reduce decoder/bandwidth use.
+#twitch-quality = "source"
 
 # Keep one small WebP poster per stream for seamless stalls/swaps. Set the
 # interval to 0 to disable snapshots entirely. Snapshots are scaled to the

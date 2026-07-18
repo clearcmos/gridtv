@@ -57,6 +57,25 @@ describe('configureTwitchPlayerQuality', () => {
     )
   })
 
+  it('selects Twitch source/pass-through as the highest available quality', () => {
+    const storage = fakeStorage()
+
+    configureTwitchPlayerQuality(
+      'https://player.twitch.tv/?channel=test',
+      storage,
+      [twitchQualityArgument('source')],
+    )
+
+    expect(storage.setItem).toHaveBeenCalledWith(
+      'video-quality',
+      JSON.stringify({ default: 'chunked' }),
+    )
+    expect(storage.setItem).toHaveBeenCalledWith(
+      'video-quality-highest-available',
+      'true',
+    )
+  })
+
   it('clears a fixed preference when automatic quality is selected', () => {
     const storage = fakeStorage()
 

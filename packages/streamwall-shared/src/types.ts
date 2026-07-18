@@ -101,6 +101,15 @@ export interface TwitchChannelSuggestion {
   isLive: boolean
 }
 
+export type TwitchLiveStatus = 'checking' | 'online' | 'offline' | 'unknown'
+
+/** Persisted assignment plus transient availability for one live-wall slot. */
+export interface LiveWallSlotState {
+  viewIdx: number
+  streamId?: string
+  twitchStatus?: TwitchLiveStatus
+}
+
 export interface StreamDelayStatus {
   isConnected: boolean
   delaySeconds: number
@@ -162,6 +171,8 @@ export interface StreamwallState {
   streams: StreamList
   customStreams: StreamList
   views: ViewState[]
+  /** Lets the wall render assigned Twitch channels that were not loaded. */
+  wallSlots?: LiveWallSlotState[]
   /**
    * Anchor grid-cell index of the view currently expanded to fill the whole
    * wall, or `null` when the normal grid layout is shown. Purely a runtime,

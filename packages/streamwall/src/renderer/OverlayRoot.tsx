@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'preact/hooks'
-import { FaEdit, FaPlus } from 'react-icons/fa'
+import { FaEdit, FaPlus, FaVideoSlash } from 'react-icons/fa'
 import {
   computeLiveTileLayout,
   StreamwallState,
   twitchLoginFromInput,
+  type LiveWallSlotState,
   type TwitchChannelSuggestion,
   type ViewPos,
   type ViewState,
@@ -24,22 +25,31 @@ export function Overlay({
   config,
   views,
   streams,
+  wallSlots = [],
   fullscreenViewIdx,
   onControl,
   onSearchTwitch = async () => [],
   gridMenuShortcut = 0,
+  fullscreenExitShortcut = 0,
 }: Pick<
   StreamwallState,
-  'config' | 'views' | 'streams' | 'fullscreenViewIdx'
+  'config' | 'views' | 'streams' | 'wallSlots' | 'fullscreenViewIdx'
 > & {
   onControl: (command: WallControlCommand) => void
   onSearchTwitch?: (query: string) => Promise<TwitchChannelSuggestion[]>
   gridMenuShortcut?: number
+  fullscreenExitShortcut?: number
 }) {
   const { width, height, activeColor } = config
   const tileCount = config.tileCount ?? config.cols * config.rows
   const [isGridMenuOpen, setGridMenuOpen] = useState(false)
   const [pickerViewIdx, setPickerViewIdx] = useState<number | null>(null)
+  const [dragSourceViewIdx, setDragSourceViewIdx] = useState<number | null>(
+    null,
+  )
+  const [dropTargetViewIdx, setDropTargetViewIdx] = useState<number | null>(
+    null,
+  )
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -47,14 +57,23 @@ export function Overlay({
         event.preventDefault()
         setPickerViewIdx(null)
         setGridMenuOpen((open) => !open)
-      } else if (event.key === 'Escape' && isGridMenuOpen) {
-        event.preventDefault()
-        setGridMenuOpen(false)
+      } else if (event.key === 'Escape') {
+        if (isGridMenuOpen) {
+          event.preventDefault()
+          setGridMenuOpen(false)
+        } else if (pickerViewIdx == null && fullscreenViewIdx != null) {
+          event.preventDefault()
+          onControl({
+            type: 'set-wall-fullscreen',
+            viewIdx: fullscreenViewIdx,
+            fullscreen: false,
+          })
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isGridMenuOpen])
+  }, [fullscreenViewIdx, isGridMenuOpen, onControl, pickerViewIdx])
 
   useEffect(() => {
     if (gridMenuShortcut > 0) {
@@ -62,6 +81,16 @@ export function Overlay({
       setGridMenuOpen((open) => !open)
     }
   }, [gridMenuShortcut])
+
+  useEffect(() => {
+    if (fullscreenExitShortcut > 0 && fullscreenViewIdx != null) {
+      onControl({
+        type: 'set-wall-fullscreen',
+        viewIdx: fullscreenViewIdx,
+        fullscreen: false,
+      })
+    }
+  }, [fullscreenExitShortcut, fullscreenViewIdx, onControl])
 
   // Keep error views on the wall (instead of leaving a silent black cell) so the
   // failure and its reason are visible; they are rendered as an error tile below.
@@ -76,16 +105,27 @@ export function Overlay({
       viewsBySpace.set(space, view)
     }
   }
+  const wallSlotsBySpace = new Map<number, LiveWallSlotState>(
+    wallSlots.map((slot) => [slot.viewIdx, slot]),
+  )
 
-  function renderTile(viewIdx: number, pos: ViewPos, view?: ViewState) {
+  function renderTile(
+    viewIdx: number,
+    pos: ViewPos,
+    view?: ViewState,
+    wallSlot?: LiveWallSlotState,
+  ) {
     const { state, context } = view ?? {
       state: 'empty' as const,
       context: null,
     }
     const content = context?.content
+    const assignedData = wallSlot?.streamId
+      ? streams.find((stream) => stream._id === wallSlot.streamId)
+      : undefined
     const data = content
       ? streams.find((stream) => content.url === stream.link)
-      : undefined
+      : assignedData
     const isError = view ? matchesState('displaying.error', state) : false
     const wallAudioMode = context?.wallAudioMode ?? 'muted'
     const isAudible = wallAudioMode === 'unmuted'
@@ -96,16 +136,96 @@ export function Overlay({
       ? matchesState('displaying.loading', state) ||
         matchesState('displaying.running.playback.stalled', state)
       : false
+    const hasAssignment = Boolean(content || wallSlot?.streamId)
+    const statusLabel = data?.label ?? data?.source ?? 'This channel'
+
+    const interactiveTarget = (target: EventTarget | null) =>
+      target instanceof Element &&
+      target.closest('button, input, [role="dialog"]') != null
 
     return (
       <SpaceBorder
         key={viewIdx}
+        data-wall-tile
+        data-view-idx={viewIdx}
         $pos={pos}
         $windowWidth={width}
         $windowHeight={height}
         $activeColor={activeColor}
         $isListening={isAudible}
         $isError={isError}
+        $isDragging={dragSourceViewIdx === viewIdx}
+        $isDropTarget={dropTargetViewIdx === viewIdx}
+        draggable={fullscreenViewIdx == null}
+        title={
+          view
+            ? 'Double-click to expand; drag to another tile to swap'
+            : 'Drag to another tile to swap'
+        }
+        onDblClick={(event) => {
+          if (!view || !content || interactiveTarget(event.target)) {
+            return
+          }
+          onControl({
+            type: 'set-wall-fullscreen',
+            viewIdx,
+            fullscreen: fullscreenViewIdx == null,
+          })
+        }}
+        onDragStart={(event) => {
+          if (
+            fullscreenViewIdx != null ||
+            interactiveTarget(event.target) ||
+            !event.dataTransfer
+          ) {
+            event.preventDefault()
+            return
+          }
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', String(viewIdx))
+          setDragSourceViewIdx(viewIdx)
+          setDropTargetViewIdx(null)
+        }}
+        onDragEnter={(event) => {
+          if (dragSourceViewIdx != null && dragSourceViewIdx !== viewIdx) {
+            event.preventDefault()
+            setDropTargetViewIdx(viewIdx)
+          }
+        }}
+        onDragOver={(event) => {
+          if (dragSourceViewIdx != null && dragSourceViewIdx !== viewIdx) {
+            event.preventDefault()
+            if (event.dataTransfer) {
+              event.dataTransfer.dropEffect = 'move'
+            }
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          const transferredText =
+            event.dataTransfer?.getData('text/plain') ?? ''
+          const transferred = /^\d+$/.test(transferredText)
+            ? Number(transferredText)
+            : null
+          const fromViewIdx =
+            dragSourceViewIdx ??
+            (transferred != null && Number.isInteger(transferred)
+              ? transferred
+              : null)
+          if (fromViewIdx != null && fromViewIdx !== viewIdx) {
+            onControl({
+              type: 'swap-wall-streams',
+              fromViewIdx,
+              toViewIdx: viewIdx,
+            })
+          }
+          setDragSourceViewIdx(null)
+          setDropTargetViewIdx(null)
+        }}
+        onDragEnd={() => {
+          setDragSourceViewIdx(null)
+          setDropTargetViewIdx(null)
+        }}
       >
         {content && (
           <OverlayViewTile
@@ -113,14 +233,33 @@ export function Overlay({
             data={data}
             isError={isError}
             errorReason={context?.error}
-            isListening={isAudible}
-            isBackgroundListening={false}
             isBlurred={isBlurred}
             isLoading={isLoading}
-            activeColor={activeColor}
           />
         )}
-        {!content && (
+        {!content && assignedData && (
+          <UnavailableTile
+            data-testid={
+              wallSlot?.twitchStatus === 'offline'
+                ? 'offline-tile'
+                : 'unavailable-tile'
+            }
+            role="status"
+          >
+            {wallSlot?.twitchStatus === 'offline' && <FaVideoSlash />}
+            <strong>{statusLabel}</strong>
+            <span>
+              {wallSlot?.twitchStatus === 'offline'
+                ? 'Offline'
+                : wallSlot?.twitchStatus === 'unknown'
+                  ? 'Status unavailable'
+                  : wallSlot?.twitchStatus === 'online'
+                    ? 'Starting stream…'
+                    : 'Checking live status…'}
+            </span>
+          </UnavailableTile>
+        )}
+        {!content && !assignedData && (
           <EmptyTile>
             <span>Empty tile {viewIdx + 1}</span>
           </EmptyTile>
@@ -140,13 +279,14 @@ export function Overlay({
           type="button"
           aria-label={`Choose stream for tile ${viewIdx + 1}`}
           title={`Choose stream for tile ${viewIdx + 1}`}
-          $empty={!content}
+          $empty={!hasAssignment}
+          draggable={false}
           onClick={() => {
             setGridMenuOpen(false)
             setPickerViewIdx(viewIdx)
           }}
         >
-          {content ? <FaEdit /> : <FaPlus />}
+          {hasAssignment ? <FaEdit /> : <FaPlus />}
         </TilePickerButton>
       </SpaceBorder>
     )
@@ -155,7 +295,12 @@ export function Overlay({
   const normalTiles = computeLiveTileLayout(tileCount, width, height).map(
     (pos) => {
       const viewIdx = pos.spaces[0]
-      return renderTile(viewIdx, pos, viewsBySpace.get(viewIdx))
+      return renderTile(
+        viewIdx,
+        pos,
+        viewsBySpace.get(viewIdx),
+        wallSlotsBySpace.get(viewIdx),
+      )
     },
   )
   const fullscreenTiles = activeViews.flatMap((view) => {
@@ -163,13 +308,21 @@ export function Overlay({
     if (!pos) {
       return []
     }
-    return [renderTile(fullscreenViewIdx ?? pos.spaces[0] ?? 0, pos, view)]
+    const viewIdx = fullscreenViewIdx ?? pos.spaces[0] ?? 0
+    return [renderTile(viewIdx, pos, view, wallSlotsBySpace.get(viewIdx))]
   })
 
   const pickerView =
     pickerViewIdx == null ? undefined : viewsBySpace.get(pickerViewIdx)
-  const pickerInitialValue = pickerView?.context.content
-    ? (twitchLoginFromInput(pickerView.context.content.url) ?? '')
+  const pickerSlot =
+    pickerViewIdx == null ? undefined : wallSlotsBySpace.get(pickerViewIdx)
+  const pickerAssignedStream = pickerSlot?.streamId
+    ? streams.find((stream) => stream._id === pickerSlot.streamId)
+    : undefined
+  const pickerURL =
+    pickerView?.context.content?.url ?? pickerAssignedStream?.link
+  const pickerInitialValue = pickerURL
+    ? (twitchLoginFromInput(pickerURL) ?? '')
     : ''
 
   return (
@@ -249,6 +402,8 @@ const SpaceBorder = styled.div.attrs<{
   $activeColor: string
   $isListening: boolean
   $isError?: boolean
+  $isDragging: boolean
+  $isDropTarget: boolean
   $borderWidth?: number
 }>(() => ({
   $borderWidth: 2,
@@ -269,12 +424,22 @@ const SpaceBorder = styled.div.attrs<{
     $pos.y === 0 ? 0 : $borderWidth}px;
   border-bottom-width: ${({ $pos, $borderWidth, $windowHeight }) =>
     $pos.y + $pos.height === $windowHeight ? 0 : $borderWidth}px;
-  box-shadow: ${({ $isListening, $activeColor }) =>
-    $isListening ? `0 0 10px ${$activeColor} inset` : 'none'};
+  box-shadow: ${({ $isListening, $activeColor, $isDropTarget }) =>
+    [
+      $isListening ? `0 0 10px ${$activeColor} inset` : '',
+      $isDropTarget ? '0 0 0 5px rgba(167, 139, 250, 0.95) inset' : '',
+    ]
+      .filter(Boolean)
+      .join(', ') || 'none'};
   box-sizing: border-box;
   container-type: size;
   pointer-events: auto;
   user-select: none;
+  cursor: ${({ $isDragging }) => ($isDragging ? 'grabbing' : 'grab')};
+  opacity: ${({ $isDragging }) => ($isDragging ? 0.62 : 1)};
+  transition:
+    box-shadow 100ms ease-out,
+    opacity 100ms ease-out;
 
   &:hover [data-wall-media-controls],
   &:focus-within [data-wall-media-controls] {
@@ -300,6 +465,43 @@ const EmptyTile = styled.div`
   font-size: clamp(10px, 5cqh, 16px);
   font-weight: 600;
   letter-spacing: 0.03em;
+`
+
+const UnavailableTile = styled.div`
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(4px, 2cqh, 10px);
+  padding: clamp(8px, 4cqh, 24px);
+  box-sizing: border-box;
+  color: rgba(255, 255, 255, 0.9);
+  text-align: center;
+  background: rgba(11, 14, 20, 0.94);
+
+  > svg {
+    width: clamp(22px, 15cqh, 58px);
+    height: clamp(22px, 15cqh, 58px);
+    color: #7c8491;
+  }
+
+  > strong {
+    max-width: 90%;
+    overflow: hidden;
+    font-size: clamp(12px, 8cqh, 26px);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  > span {
+    color: #9ca3af;
+    font-size: clamp(10px, 5cqh, 15px);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
 `
 
 const TilePickerButton = styled.button<{ $empty: boolean }>`

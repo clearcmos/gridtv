@@ -27,11 +27,8 @@ function renderTile(
         data={undefined}
         isError={false}
         errorReason={null}
-        isListening={false}
-        isBackgroundListening={false}
         isBlurred={false}
         isLoading={false}
-        activeColor="#fff"
         {...props}
       />,
       container!,
@@ -73,7 +70,7 @@ describe('OverlayViewTile', () => {
     expect(tile.textContent).toBe('Stream error')
   })
 
-  test('does not render the error badge for a non-error view', () => {
+  test('does not render attribution over a healthy stream', () => {
     const data: StreamData = {
       _id: 'a',
       _dataSource: 'test',
@@ -90,10 +87,9 @@ describe('OverlayViewTile', () => {
 
     expect(tile.textContent).not.toContain('Stream error')
     expect(tile.textContent).not.toContain('Stream unavailable')
-    expect(tile.textContent).toContain('Example Stream')
-    // The loading spinner is always present in the DOM (visibility is
-    // toggled via CSS, see the isLoading tests below); it's the only svg
-    // expected here since the URL doesn't match a known platform icon.
+    expect(tile.textContent).not.toContain('Example Stream')
+    // The hidden loading spinner is the only overlay retained for a healthy
+    // stream; the platform/name badge must not cover the video.
     const svgs = tile.querySelectorAll('svg')
     expect(svgs).toHaveLength(1)
     expect(svgs[0].querySelector('circle')).not.toBeNull()
@@ -131,21 +127,12 @@ describe('OverlayViewTile', () => {
     const tile = renderTile({
       data,
       isError: false,
-      isListening: true,
       isBlurred: true,
       isLoading: true,
-      activeColor: '#f00',
     })
 
     for (const el of tile.querySelectorAll('*')) {
-      for (const propName of [
-        'position',
-        'islistening',
-        'activecolor',
-        'isvisible',
-        'isblurred',
-        'isdesaturated',
-      ]) {
+      for (const propName of ['isvisible', 'isblurred', 'isdesaturated']) {
         expect(
           el.hasAttribute(propName),
           `<${el.tagName.toLowerCase()}> unexpectedly has a "${propName}" attribute`,

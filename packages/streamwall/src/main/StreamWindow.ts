@@ -142,6 +142,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (input.type === 'keyDown' && input.key === 'F1') {
         event.preventDefault()
         this.overlayView?.webContents.send('wall:grid-menu-shortcut')
+      } else if (input.type === 'keyDown' && input.key === 'Escape') {
+        event.preventDefault()
+        this.overlayView?.webContents.send('wall:fullscreen-exit-shortcut')
       }
     })
     win.on('close', (event) => this.emit('close', event))
@@ -188,6 +191,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (input.type === 'keyDown' && input.key === 'F1') {
         event.preventDefault()
         this.overlayView?.webContents.send('wall:grid-menu-shortcut')
+      } else if (input.type === 'keyDown' && input.key === 'Escape') {
+        event.preventDefault()
+        this.overlayView?.webContents.send('wall:fullscreen-exit-shortcut')
       }
     })
 
@@ -345,6 +351,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (input.type === 'keyDown' && input.key === 'F1') {
         event.preventDefault()
         this.overlayView.webContents.send('wall:grid-menu-shortcut')
+      } else if (input.type === 'keyDown' && input.key === 'Escape') {
+        event.preventDefault()
+        this.overlayView.webContents.send('wall:fullscreen-exit-shortcut')
       }
     })
 
@@ -667,7 +676,6 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         this.parkedViews.set(view.getSnapshot().context.id, view)
         continue
       }
-      const viewId = view.getSnapshot().context.id
       view.stop()
       const {
         view: contentView,
@@ -778,6 +786,8 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         break
       case 'set-wall-tile-count':
       case 'set-wall-stream':
+      case 'set-wall-fullscreen':
+      case 'swap-wall-streams':
         // Main owns the persisted layout/source data and handles these after
         // the validated command is emitted through StreamWindowEventMap.
         break

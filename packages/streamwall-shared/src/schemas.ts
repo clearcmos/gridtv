@@ -100,6 +100,28 @@ export const wallControlCommandSchema = z.discriminatedUnion('type', [
       .max(LIVE_TILE_MAX - 1),
     username: z.string().trim().max(100),
   }),
+  z.object({
+    type: z.literal('set-wall-fullscreen'),
+    viewIdx: z
+      .number()
+      .int()
+      .min(0)
+      .max(LIVE_TILE_MAX - 1),
+    fullscreen: z.boolean(),
+  }),
+  z.object({
+    type: z.literal('swap-wall-streams'),
+    fromViewIdx: z
+      .number()
+      .int()
+      .min(0)
+      .max(LIVE_TILE_MAX - 1),
+    toViewIdx: z
+      .number()
+      .int()
+      .min(0)
+      .max(LIVE_TILE_MAX - 1),
+  }),
 ])
 export type WallControlCommand = z.infer<typeof wallControlCommandSchema>
 
@@ -422,6 +444,16 @@ const dataSourceHealthSchema = z.object({
   updatedAt: z.number(),
 })
 
+const liveWallSlotStateSchema = z.object({
+  viewIdx: z
+    .number()
+    .int()
+    .min(0)
+    .max(LIVE_TILE_MAX - 1),
+  streamId: z.string().optional(),
+  twitchStatus: z.enum(['checking', 'online', 'offline', 'unknown']).optional(),
+})
+
 /**
  * The full `StreamwallState` snapshot broadcast by the Streamwall desktop
  * over the trusted uplink. Every field the server actually reads is validated
@@ -444,6 +476,7 @@ export const streamwallStateSchema = z.object({
   streams: z.array(streamDataSchema),
   customStreams: z.array(streamDataSchema),
   views: z.array(viewStateSchema),
+  wallSlots: z.array(liveWallSlotStateSchema).max(LIVE_TILE_MAX).optional(),
   fullscreenViewIdx: viewIdxSchema.nullable(),
   streamdelay: streamDelayStatusSchema.nullable(),
   layoutPresets: z.array(layoutPresetSchema),

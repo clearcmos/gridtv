@@ -1,4 +1,5 @@
 export const TWITCH_QUALITIES = [
+  'source',
   'auto',
   '160p',
   '360p',
@@ -70,6 +71,7 @@ export function twitchQualityArgument(quality: TwitchQuality): string {
 }
 
 const TWITCH_STORAGE_QUALITY: Record<Exclude<TwitchQuality, 'auto'>, string> = {
+  source: 'chunked',
   '160p': '160p30',
   '360p': '360p30',
   '480p': '480p30',
@@ -118,7 +120,10 @@ export function configureTwitchPlayerQuality(
       'video-quality',
       JSON.stringify({ default: TWITCH_STORAGE_QUALITY[quality] }),
     )
-    storage.setItem('video-quality-highest-available', 'false')
+    storage.setItem(
+      'video-quality-highest-available',
+      quality === 'source' ? 'true' : 'false',
+    )
   } catch {
     // Storage can be unavailable in an opaque/blocked context. The Twitch
     // player still works and simply falls back to its automatic selection.

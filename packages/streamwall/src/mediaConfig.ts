@@ -14,7 +14,7 @@ export interface StreamMediaConfig {
   sessionMode: StreamSessionMode
   /** Whether normal Twitch channel URLs use the lightweight official player. */
   twitchPlayer: boolean
-  /** Fixed Twitch rendition for dense walls, or Twitch's automatic choice. */
+  /** Highest/source, fixed rendition, or Twitch's automatic choice. */
   twitchQuality: TwitchQuality
   /** Milliseconds between poster snapshots; zero disables snapshots. */
   snapshotIntervalMs: number
@@ -25,15 +25,15 @@ export interface StreamMediaConfig {
 }
 
 /**
- * Scaling-oriented defaults for this fork. A shared session avoids downloading
- * and retaining a complete copy of Twitch's application shell per tile, while
- * bounded snapshots preserve the seamless-stall poster without capturing a
- * source-resolution PNG every second.
+ * A shared session avoids downloading and retaining a complete copy of
+ * Twitch's application shell per tile. Source quality deliberately prioritizes
+ * the clearest available rendition; users can still choose a lower fixed
+ * quality in config when decoder or bandwidth limits matter more.
  */
 export const DEFAULT_STREAM_MEDIA_CONFIG: StreamMediaConfig = {
   sessionMode: 'shared',
   twitchPlayer: true,
-  twitchQuality: '360p',
+  twitchQuality: 'source',
   snapshotIntervalMs: 10_000,
   snapshotMaxWidth: 640,
   snapshotQuality: 0.65,

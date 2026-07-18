@@ -9,6 +9,11 @@ export interface LiveWallResizeContext {
   knownStreamIds: ReadonlySet<string>
 }
 
+type LiveWallAssignmentContext = Pick<
+  LiveWallResizeContext,
+  'viewsState' | 'transact'
+>
+
 /**
  * Rebuilds the wall as `count` sequential slots, preserving the first active,
  * distinct streams in visual order. Anything beyond the new capacity is
@@ -52,4 +57,27 @@ export function applyLiveTileCount(
   })
 
   return { count, keptStreamIds }
+}
+
+/** Atomically swaps two persisted cell assignments, including an empty cell. */
+export function swapLiveWallAssignments(
+  ctx: LiveWallAssignmentContext,
+  fromViewIdx: number,
+  toViewIdx: number,
+): boolean {
+  if (fromViewIdx === toViewIdx || fromViewIdx < 0 || toViewIdx < 0) {
+    return false
+  }
+  const fromCell = ctx.viewsState.get(String(fromViewIdx))
+  const toCell = ctx.viewsState.get(String(toViewIdx))
+  if (!fromCell || !toCell) {
+    return false
+  }
+  const fromStreamId = fromCell.get('streamId')
+  const toStreamId = toCell.get('streamId')
+  ctx.transact(() => {
+    fromCell.set('streamId', toStreamId)
+    toCell.set('streamId', fromStreamId)
+  })
+  return true
 }

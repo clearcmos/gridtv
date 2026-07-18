@@ -20,6 +20,12 @@ const api = {
     ipcRenderer.on('wall:grid-menu-shortcut', internalHandler)
     return () => ipcRenderer.off('wall:grid-menu-shortcut', internalHandler)
   },
+  onFullscreenExitShortcut: (handler: () => void) => {
+    const internalHandler = () => handler()
+    ipcRenderer.on('wall:fullscreen-exit-shortcut', internalHandler)
+    return () =>
+      ipcRenderer.off('wall:fullscreen-exit-shortcut', internalHandler)
+  },
   onState: (handleState: (state: StreamwallState) => void) => {
     const internalHandler = (_ev: IpcRendererEvent, state: StreamwallState) =>
       handleState(state)

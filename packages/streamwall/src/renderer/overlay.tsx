@@ -20,6 +20,7 @@ initRendererSentry()
 function App() {
   const [state, setState] = useState<StreamwallState | undefined>()
   const [gridMenuShortcut, setGridMenuShortcut] = useState(0)
+  const [fullscreenExitShortcut, setFullscreenExitShortcut] = useState(0)
 
   useEffect(() => {
     const unsubscribe = window.streamwallLayer.onState(setState)
@@ -35,6 +36,14 @@ function App() {
     [],
   )
 
+  useEffect(
+    () =>
+      window.streamwallLayer.onFullscreenExitShortcut(() =>
+        setFullscreenExitShortcut((value) => value + 1),
+      ),
+    [],
+  )
+
   useHotkeys('ctrl+shift+i', () => {
     window.streamwallLayer.openDevTools()
   })
@@ -43,16 +52,18 @@ function App() {
     return
   }
 
-  const { config, views, streams, fullscreenViewIdx } = state
+  const { config, views, streams, wallSlots, fullscreenViewIdx } = state
   return (
     <Overlay
       config={config}
       views={views}
       streams={streams}
+      wallSlots={wallSlots}
       fullscreenViewIdx={fullscreenViewIdx}
       onControl={window.streamwallLayer.control}
       onSearchTwitch={window.streamwallLayer.searchTwitch}
       gridMenuShortcut={gridMenuShortcut}
+      fullscreenExitShortcut={fullscreenExitShortcut}
     />
   )
 }

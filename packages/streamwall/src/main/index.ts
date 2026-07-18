@@ -18,6 +18,7 @@ import {
   parseControlEndpoint,
   twitchChannelUrl,
   twitchLoginFromInput,
+  type TwitchLiveStatus,
 } from 'streamwall-shared'
 import { updateElectronApp } from 'update-electron-app'
 import WebSocket from 'ws'
@@ -65,10 +66,15 @@ import {
   applyLayoutPreset,
   buildLayoutPreset,
 } from './layoutPresets'
-import { applyLiveTileCount } from './liveWallResize'
+import {
+  canLoadLiveWallStream,
+  twitchStatusForStream,
+} from './liveWallAvailability'
+import { applyLiveTileCount, swapLiveWallAssignments } from './liveWallResize'
 import {
   normalizeLiveWallState,
   resizeLiveWallState,
+  swapLiveWallTileSettings,
   updateLiveWallTileSettings,
 } from './liveWallState'
 import { devServerOrigin } from './loadHTML'
@@ -87,7 +93,10 @@ import { flushStorage, loadStorage, safeUpdate } from './storage'
 import StreamdelayClient from './StreamdelayClient'
 import StreamWindow from './StreamWindow'
 import TwitchBot from './TwitchBot'
-import { createTwitchChannelSearch } from './twitchSearch'
+import {
+  createTwitchChannelSearch,
+  createTwitchLiveStatusLookup,
+} from './twitchSearch'
 import { checkUplinkCommandGate } from './uplinkCommandGate'
 import { UPLINK_ORIGIN, shouldForwardUpdateToUplink } from './uplinkEcho'
 import { routeUplinkWsMessage } from './uplinkMessageRouting'
@@ -546,6 +555,8 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   })
 
   const overlayStreamData = new LocalStreamData()
+  const twitchLiveStatuses = new Map<string, TwitchLiveStatus>()
+  const lookupTwitchLiveStatus = createTwitchLiveStatusLookup()
 
   const streamWindowConfig = {
     // `cols`/`rows` remain for protocol compatibility, while tileCount drives
@@ -597,6 +608,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     streams: [],
     customStreams: [],
     views: [],
+    wallSlots: [],
     fullscreenViewIdx: null,
     streamdelay: null,
     layoutPresets: db.data.layoutPresets,
@@ -621,7 +633,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
           .get(String(fullscreenViewIdx))
           ?.get('streamId')
         const stream = clientState.streams.find((s) => s._id === streamId)
-        if (stream) {
+        if (stream && canLoadLiveWallStream(stream, twitchLiveStatuses)) {
           streamWindow.setViews(
             fullscreenViewContentMap(streamWindowConfig.tileCount ?? 1, 1, {
               url: stream.link,
@@ -643,7 +655,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       for (const [key, viewData] of viewsState) {
         const streamId = viewData.get('streamId')
         const stream = clientState.streams.find((s) => s._id === streamId)
-        if (!stream) {
+        if (!stream || !canLoadLiveWallStream(stream, twitchLiveStatuses)) {
           continue
         }
         viewContentMap.set(key, {
@@ -665,6 +677,22 @@ async function main(argv: ReturnType<typeof parseArgs>) {
 
   const stateDoc = new Y.Doc()
   const viewsState = stateDoc.getMap<Y.Map<string | undefined>>('views')
+
+  function buildLiveWallSlots(): NonNullable<StreamwallState['wallSlots']> {
+    return Array.from({ length: liveWallState.tileCount }, (_, viewIdx) => {
+      const streamId = viewsState.get(String(viewIdx))?.get('streamId')
+      const stream = streamId
+        ? clientState.streams.find((candidate) => candidate._id === streamId)
+        : undefined
+      return {
+        viewIdx,
+        streamId,
+        twitchStatus: stream
+          ? twitchStatusForStream(stream, twitchLiveStatuses)
+          : undefined,
+      }
+    })
+  }
 
   if (db.data.stateDoc) {
     log.info('Loading stateDoc from storage...')
@@ -714,6 +742,67 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   })
   playlistScheduler.start()
 
+  let twitchStatusRefreshQueue = Promise.resolve()
+
+  function refreshTwitchStatuses(rawLogins: readonly string[]) {
+    const logins = [
+      ...new Set(
+        rawLogins
+          .map((input) => twitchLoginFromInput(input))
+          .filter((login): login is string => login != null),
+      ),
+    ]
+    if (logins.length === 0) {
+      return Promise.resolve()
+    }
+    for (const login of logins) {
+      const current = twitchLiveStatuses.get(login)
+      if (current == null || current === 'unknown') {
+        twitchLiveStatuses.set(login, 'checking')
+      }
+    }
+    updateState({})
+
+    const refresh = async () => {
+      try {
+        const results = await lookupTwitchLiveStatus(logins)
+        for (const login of logins) {
+          const isLive = results.get(login)
+          if (isLive != null) {
+            twitchLiveStatuses.set(login, isLive ? 'online' : 'offline')
+          }
+        }
+      } catch (error) {
+        log.warn('Unable to check Twitch live status:', error)
+        for (const login of logins) {
+          if (twitchLiveStatuses.get(login) === 'checking') {
+            twitchLiveStatuses.set(login, 'unknown')
+          }
+        }
+      }
+      updateState({})
+      updateViewsFromStateDoc()
+    }
+    const queued = twitchStatusRefreshQueue.then(refresh, refresh)
+    twitchStatusRefreshQueue = queued
+    return queued
+  }
+
+  function refreshAssignedTwitchStatuses() {
+    const logins: string[] = []
+    for (const cell of viewsState.values()) {
+      const streamId = cell.get('streamId')
+      const stream = clientState.streams.find(
+        (candidate) => candidate._id === streamId,
+      )
+      const login = stream ? twitchLoginFromInput(stream.link) : null
+      if (login) {
+        logins.push(login)
+      }
+    }
+    return refreshTwitchStatuses(logins)
+  }
+
   function setLiveTileCount(count: number) {
     clientState = { ...clientState, fullscreenViewIdx: null }
     applyLiveTileCount(
@@ -755,6 +844,9 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       log.warn('Ignoring invalid Twitch channel input:', input)
       return
     }
+    if (!twitchLiveStatuses.has(login)) {
+      twitchLiveStatuses.set(login, 'checking')
+    }
     const url = twitchChannelUrl(login)
     const existing =
       clientState.streams.byURL?.get(url) ??
@@ -769,6 +861,51 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       })
     }
     stateDoc.transact(() => cell.set('streamId', streamId))
+    void refreshTwitchStatuses([login])
+  }
+
+  function setLiveWallFullscreen(viewIdx: number, fullscreen: boolean) {
+    if (viewIdx < 0 || viewIdx >= liveWallState.tileCount) {
+      return
+    }
+    if (fullscreen && !viewsState.get(String(viewIdx))?.get('streamId')) {
+      return
+    }
+    updateState({ fullscreenViewIdx: fullscreen ? viewIdx : null })
+    updateViewsFromStateDoc()
+  }
+
+  function swapLiveWallStreams(fromViewIdx: number, toViewIdx: number) {
+    if (
+      fromViewIdx === toViewIdx ||
+      fromViewIdx < 0 ||
+      toViewIdx < 0 ||
+      fromViewIdx >= liveWallState.tileCount ||
+      toViewIdx >= liveWallState.tileCount
+    ) {
+      return
+    }
+    if (
+      !viewsState.has(String(fromViewIdx)) ||
+      !viewsState.has(String(toViewIdx))
+    ) {
+      return
+    }
+    clientState = { ...clientState, fullscreenViewIdx: null }
+    // This runs before the Yjs observer lays out the swapped players, so the
+    // actor arriving in each cell immediately receives its own prior settings.
+    swapLiveWallTileSettings(liveWallState, fromViewIdx, toViewIdx)
+    if (
+      !swapLiveWallAssignments(
+        { viewsState, transact: (fn) => stateDoc.transact(fn) },
+        fromViewIdx,
+        toViewIdx,
+      )
+    ) {
+      return
+    }
+    persistLiveWall()
+    updateState({})
   }
 
   function persistWallMediaCommand(command: WallControlCommand) {
@@ -796,6 +933,12 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         break
       case 'set-wall-stream':
         setLiveWallStream(command.viewIdx, command.username)
+        break
+      case 'set-wall-fullscreen':
+        setLiveWallFullscreen(command.viewIdx, command.fullscreen)
+        break
+      case 'swap-wall-streams':
+        swapLiveWallStreams(command.fromViewIdx, command.toViewIdx)
         break
     }
   }
@@ -867,12 +1010,8 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       log.debug('Reloading view:', msg.viewIdx)
       streamWindow.reloadView(msg.viewIdx)
     } else if (msg.type === 'set-view-fullscreen') {
-      // Runtime-only wall zoom (issue #362): remember which view fills the
-      // wall (or null) and re-derive the layout. Broadcast the new value first
-      // so clients render the expansion consistently, then re-lay-out the wall.
       log.debug('Setting view fullscreen:', msg.viewIdx, msg.fullscreen)
-      updateState({ fullscreenViewIdx: msg.fullscreen ? msg.viewIdx : null })
-      updateViewsFromStateDoc()
+      setLiveWallFullscreen(msg.viewIdx, msg.fullscreen)
     } else if (msg.type === 'browse' || msg.type === 'dev-tools') {
       if (browseWindow && !browseWindow.isDestroyed()) {
         // DevTools needs a fresh webContents to work. Close any existing window.
@@ -994,6 +1133,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
 
   function updateState(newState: Partial<StreamwallState>) {
     clientState = { ...clientState, ...newState }
+    clientState = { ...clientState, wallSlots: buildLiveWallSlots() }
     streamWindow.onState(clientState)
     stateEmitter.emit('state', clientState)
   }
@@ -1229,6 +1369,9 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       })
       legacyWallMigrationPending = false
     }
+    // Stored Twitch assignments are status-gated on every launch: no player
+    // WebContents is created until Twitch confirms that channel is live.
+    await refreshAssignedTwitchStatuses()
     updateViewsFromStateDoc()
     // Newly-loaded stream data may resolve a playlist URL that failed to
     // resolve on startup or a prior interval tick; fill it in immediately

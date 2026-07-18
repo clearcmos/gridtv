@@ -3,10 +3,8 @@ import {
   FaExclamationTriangle,
   FaFacebook,
   FaInstagram,
-  FaMapMarkerAlt,
   FaTiktok,
   FaTwitch,
-  FaVolumeUp,
   FaYoutube,
 } from 'react-icons/fa'
 import { RiKickFill, RiTwitterXFill } from 'react-icons/ri'
@@ -21,24 +19,16 @@ export function OverlayViewTile({
   data,
   isError,
   errorReason,
-  isListening,
-  isBackgroundListening,
   isBlurred,
   isLoading,
-  activeColor,
 }: {
   url: string
   data: StreamData | undefined
   isError: boolean
   errorReason: string | null | undefined
-  isListening: boolean
-  isBackgroundListening: boolean
   isBlurred: boolean
   isLoading: boolean
-  activeColor: string
 }) {
-  const hasTitle = data && (data.label || data.source)
-  const position = data?.labelPosition ?? 'top-left'
   const label = data?.label || data?.source
 
   if (isError) {
@@ -59,25 +49,6 @@ export function OverlayViewTile({
   return (
     <>
       <FilterCover $isBlurred={isBlurred} $isDesaturated={isLoading} />
-      {hasTitle && (
-        <StreamTitle
-          $position={position}
-          $activeColor={activeColor}
-          $isListening={isListening}
-        >
-          <StreamIcon url={url} />
-          <span>{data.label ? data.label : <>{data.source}</>}</span>
-          {(isListening || isBackgroundListening) && <FaVolumeUp />}
-        </StreamTitle>
-      )}
-      {data?.city && (
-        <StreamLocation>
-          <FaMapMarkerAlt />
-          <span>
-            {data.city} {data.state}
-          </span>
-        </StreamLocation>
-      )}
       <LoadingSpinner $isVisible={isLoading} />
     </>
   )
@@ -110,98 +81,6 @@ function StreamIcon({ url }: { url: string }) {
   }
   return null
 }
-
-const StreamTitle = styled.div<{
-  $position: StreamData['labelPosition']
-  $isListening: boolean
-  $activeColor: string
-}>`
-  position: absolute;
-  ${({ $position }) => {
-    if ($position === 'top-left') {
-      return `top: 0; left: 0;`
-    } else if ($position === 'top-right') {
-      return `top: 0; right: 0;`
-    } else if ($position === 'bottom-right') {
-      return `bottom: 0; right: 0;`
-    } else if ($position === 'bottom-left') {
-      return `bottom: 0; left: 0;`
-    }
-  }}
-  max-width: calc(100% - clamp(4px, 2cqw, 10px));
-  box-sizing: border-box;
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(2px, 1cqh, 4px) clamp(4px, 2cqw, 10px);
-  margin: clamp(2px, 1cqh, 5px);
-  font-weight: 600;
-  font-size: clamp(9px, 7cqh, 20px);
-  color: white;
-  text-shadow: 0 0 4px black;
-  letter-spacing: -0.025em;
-  background: ${({ $isListening, $activeColor }) =>
-    Color($isListening ? $activeColor : 'black')
-      .alpha(0.5)
-      .toString()};
-  border-radius: clamp(2px, 1cqh, 4px);
-  backdrop-filter: blur(10px);
-  overflow: hidden;
-
-  span {
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
-  }
-
-  svg {
-    width: 1.25em;
-    height: 1.25em;
-    overflow: visible;
-    filter: drop-shadow(0 0 4px black);
-
-    &:first-child {
-      margin-right: 0.35em;
-    }
-
-    &:last-child {
-      margin-left: 0.5em;
-    }
-
-    path {
-      fill: white;
-    }
-  }
-`
-
-const StreamLocation = styled.div`
-  position: absolute;
-  bottom: 0px;
-  left: 0px;
-  max-width: calc(100% - 18px);
-
-  display: flex;
-  align-items: center;
-  gap: clamp(1px, 0.8cqh, 3px);
-  margin: clamp(2px, 1cqh, 5px) clamp(4px, 1.8cqw, 9px);
-  font-weight: 800;
-  font-size: clamp(8px, 5cqh, 14px);
-  color: white;
-  letter-spacing: -0.025em;
-  opacity: 0.9;
-  filter: drop-shadow(0 0 4px black);
-
-  span {
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
-  }
-
-  svg {
-    flex-shrink: 0;
-  }
-`
 
 const LoadingSpinner = styled(TailSpin)<{ $isVisible: boolean }>`
   position: absolute;

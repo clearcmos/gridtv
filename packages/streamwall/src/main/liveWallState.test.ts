@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   normalizeLiveWallState,
   resizeLiveWallState,
+  swapLiveWallTileSettings,
   updateLiveWallTileSettings,
 } from './liveWallState'
 
@@ -61,5 +62,27 @@ describe('live wall stored state', () => {
     resizeLiveWallState(state, 1)
     expect(state.tileCount).toBe(1)
     expect(Object.keys(state.tiles)).toEqual(['0'])
+  })
+
+  it('swaps audio and playback settings with moved streams', () => {
+    const state = normalizeLiveWallState(undefined, 2)
+    updateLiveWallTileSettings(state, 0, {
+      audioMode: 'unmuted',
+      volume: 0.35,
+      paused: true,
+    })
+
+    swapLiveWallTileSettings(state, 0, 1)
+
+    expect(state.tiles['0']).toEqual({
+      audioMode: 'muted',
+      volume: 1,
+      paused: false,
+    })
+    expect(state.tiles['1']).toEqual({
+      audioMode: 'unmuted',
+      volume: 0.35,
+      paused: true,
+    })
   })
 })

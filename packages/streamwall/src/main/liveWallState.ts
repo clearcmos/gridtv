@@ -93,3 +93,26 @@ export function updateLiveWallTileSettings(
     paused: patch.paused ?? current.paused,
   }
 }
+
+/** Keeps a stream's audio/playback choices attached while its tile is moved. */
+export function swapLiveWallTileSettings(
+  state: LiveWallStoredState,
+  fromViewIdx: number,
+  toViewIdx: number,
+): void {
+  if (
+    fromViewIdx === toViewIdx ||
+    fromViewIdx < 0 ||
+    toViewIdx < 0 ||
+    fromViewIdx >= state.tileCount ||
+    toViewIdx >= state.tileCount
+  ) {
+    return
+  }
+  const fromKey = String(fromViewIdx)
+  const toKey = String(toViewIdx)
+  const from = state.tiles[fromKey] ?? DEFAULT_LIVE_WALL_TILE_SETTINGS
+  const to = state.tiles[toKey] ?? DEFAULT_LIVE_WALL_TILE_SETTINGS
+  state.tiles[fromKey] = { ...to }
+  state.tiles[toKey] = { ...from }
+}
