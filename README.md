@@ -30,7 +30,8 @@ the tile. This works for a wide variety of pages without specialized scrapers.
 - **Exact 1–9 tile wall:** press **F1** and click a number; every count fills the window edge-to-edge without an unused grid cell.
 - **Direct stream replacement:** click the edit/plus icon in any tile and type a Twitch username; a full URL is optional.
 - **Per-tile audio mixing:** every tile can be muted or unmuted independently, so multiple streams can play audio simultaneously, each with its own volume slider.
-- **Fast wall interaction:** double-click a playing tile to expand it, press Escape or double-click again to restore the wall, and drag one tile onto another to swap them.
+- **Fast wall interaction:** hover and press **F** to expand a playing tile, press **F** again to restore the wall, and drag one tile onto another to swap them.
+- **Docked Twitch chat:** while a Twitch stream is fullscreen, press **C** to show or hide its interactive chat in a right-side dock.
 - **Resizable tiles:** right-drag across cells to stretch one stream over a larger region; displaced streams move to available cells when possible.
 - **Offline-aware restore:** saved Twitch assignments are checked together on startup; offline channels show a replaceable placeholder without creating a failing player.
 - **Blur/censor:** blur individual tiles, or trigger a wall-wide [Streamdelay](https://github.com/chromakode/streamdelay) censor mode.
@@ -139,11 +140,16 @@ HLS inputs cap automatic quality selection to the player size.
 Hover a tile to pause/play it, adjust its volume, or toggle it between
 **Muted** and **Unmuted**. Every unmuted tile is mixed simultaneously. The
 wall does not place a permanent platform/name badge over a healthy video.
+Press **E** while hovering a stream to toggle its mute state without opening
+the controls.
 
-Double-click a playing tile to fill the wall. Double-click it again or press
-**Escape** to return to the grid. Click and hold on a tile, then drag it onto
-another tile to swap their positions; mute, volume, and playback settings move
-with their streams.
+Hover a playing tile and press **F** to fill the wall. Press **F** again to
+return to the grid. Double-click and **Escape** remain available for the same
+fullscreen behavior. While a Twitch stream is fullscreen, press **C** to show
+or hide its interactive chat. Chat is docked on the right and the video resizes
+to use the remaining space. Click and hold on a tile, then drag it onto another
+tile to swap their positions; mute, volume, and playback settings move with
+their streams.
 
 Press **F1** to choose an exact tile count from 1 through 9. Shrinking keeps the
 first active streams in visual order and closes every player that no longer
@@ -172,8 +178,11 @@ the app runs. Pending writes are flushed before quit. Custom Twitch sources use
 stable URL-derived IDs, so removing or reordering sources cannot detach the
 saved layout on the next launch.
 
-The overlay window has one keyboard hotkey:
+The overlay window also supports these keyboard controls:
 
+- **F**: Toggle fullscreen for the hovered stream
+- **E**: Toggle mute for the hovered stream
+- **C**: Toggle the right-side Twitch chat dock while fullscreen
 - **ctrl+shift+i**: Open devtools for the overlay
 
 ### Optional compatibility uplink

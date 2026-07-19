@@ -31,6 +31,12 @@ const api = {
     return () =>
       ipcRenderer.off('wall:fullscreen-exit-shortcut', internalHandler)
   },
+  onTileKeyShortcut: (handler: (key: string) => void) => {
+    const internalHandler = (_event: IpcRendererEvent, key: string) =>
+      handler(key)
+    ipcRenderer.on('wall:tile-key-shortcut', internalHandler)
+    return () => ipcRenderer.off('wall:tile-key-shortcut', internalHandler)
+  },
   onState: (handleState: (state: StreamwallState) => void) => {
     const internalHandler = (_ev: IpcRendererEvent, state: StreamwallState) =>
       handleState(state)

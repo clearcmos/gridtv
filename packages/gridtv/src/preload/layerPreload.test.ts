@@ -14,6 +14,7 @@ vi.mock('./sentryPreload', () => ({}))
 
 type LayerApi = {
   control: (command: unknown) => void
+  onTileKeyShortcut: (handler: (key: string) => void) => () => void
 }
 
 function exposedLayerApi(): LayerApi {
@@ -47,5 +48,20 @@ describe('layerPreload wall controls', () => {
     exposedLayerApi().control(command)
 
     expect(send).toHaveBeenCalledWith('wall-control', command)
+  })
+
+  test('subscribes and unsubscribes forwarded tile keyboard shortcuts', async () => {
+    await import('./layerPreload')
+    const handler = vi.fn()
+
+    const unsubscribe = exposedLayerApi().onTileKeyShortcut(handler)
+    const internalHandler = on.mock.calls.find(
+      ([channel]) => channel === 'wall:tile-key-shortcut',
+    )?.[1]
+    internalHandler?.({}, 'e')
+
+    expect(handler).toHaveBeenCalledWith('e')
+    unsubscribe()
+    expect(off).toHaveBeenCalledWith('wall:tile-key-shortcut', internalHandler)
   })
 })

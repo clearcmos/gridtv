@@ -183,6 +183,8 @@ export interface StreamwallState {
    * assignments.
    */
   fullscreenViewIdx: number | null
+  /** Whether Twitch chat is docked beside the currently expanded stream. */
+  fullscreenChatVisible?: boolean
   streamdelay: StreamDelayStatus | null
   layoutPresets: LayoutPreset[]
   /** Stream URLs (`StreamDataContent.link`) a user has starred for quick access. */

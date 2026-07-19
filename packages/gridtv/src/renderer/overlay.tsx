@@ -22,6 +22,10 @@ function App() {
   const [gridMenuShortcut, setGridMenuShortcut] = useState(0)
   const [fitModeShortcut, setFitModeShortcut] = useState(0)
   const [fullscreenExitShortcut, setFullscreenExitShortcut] = useState(0)
+  const [tileKeyShortcut, setTileKeyShortcut] = useState<{
+    key: string
+    sequence: number
+  }>()
 
   useEffect(() => {
     const unsubscribe = window.streamwallLayer.onState(setState)
@@ -33,6 +37,17 @@ function App() {
     () =>
       window.streamwallLayer.onGridMenuShortcut(() =>
         setGridMenuShortcut((value) => value + 1),
+      ),
+    [],
+  )
+
+  useEffect(
+    () =>
+      window.streamwallLayer.onTileKeyShortcut((key) =>
+        setTileKeyShortcut((current) => ({
+          key,
+          sequence: (current?.sequence ?? 0) + 1,
+        })),
       ),
     [],
   )
@@ -61,7 +76,14 @@ function App() {
     return
   }
 
-  const { config, views, streams, wallSlots, fullscreenViewIdx } = state
+  const {
+    config,
+    views,
+    streams,
+    wallSlots,
+    fullscreenViewIdx,
+    fullscreenChatVisible,
+  } = state
   return (
     <Overlay
       config={config}
@@ -69,11 +91,13 @@ function App() {
       streams={streams}
       wallSlots={wallSlots}
       fullscreenViewIdx={fullscreenViewIdx}
+      fullscreenChatVisible={fullscreenChatVisible}
       onControl={window.streamwallLayer.control}
       onSearchTwitch={window.streamwallLayer.searchTwitch}
       gridMenuShortcut={gridMenuShortcut}
       fitModeShortcut={fitModeShortcut}
       fullscreenExitShortcut={fullscreenExitShortcut}
+      tileKeyShortcut={tileKeyShortcut}
     />
   )
 }

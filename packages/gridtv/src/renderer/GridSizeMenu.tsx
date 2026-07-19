@@ -68,6 +68,27 @@ export function GridSizeMenu({
             </ControlCopy>
           </ControlRow>
           <ControlRow>
+            <ShortcutKey>F</ShortcutKey>
+            <ControlCopy>
+              <strong>Fullscreen hovered stream</strong>
+              <span>Press again to return to the grid.</span>
+            </ControlCopy>
+          </ControlRow>
+          <ControlRow>
+            <ShortcutKey>E</ShortcutKey>
+            <ControlCopy>
+              <strong>Mute / Unmute</strong>
+              <span>Toggle audio for the stream under the pointer.</span>
+            </ControlCopy>
+          </ControlRow>
+          <ControlRow>
+            <ShortcutKey>C</ShortcutKey>
+            <ControlCopy>
+              <strong>Fullscreen Twitch chat</strong>
+              <span>Show or hide chat in a dock beside the video.</span>
+            </ControlCopy>
+          </ControlRow>
+          <ControlRow>
             <ShortcutKey>Double-click</ShortcutKey>
             <ControlCopy>
               <strong>True fullscreen</strong>

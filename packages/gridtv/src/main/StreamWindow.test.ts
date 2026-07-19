@@ -61,6 +61,9 @@ function makeStreamWindow(config: StreamWindowConfig) {
   sw.initialMaximizeTimers = []
   sw.nativeFullscreenBeforeTile = undefined
   sw.tileNativeFullscreenEntered = false
+  sw.chatView = undefined
+  sw.chatChannel = undefined
+  sw.fullscreenChatVisible = false
   return sw
 }
 
@@ -981,6 +984,53 @@ describe('StreamWindow.setViews expanding a view to fill the wall (issue #362)',
     expect(other.stop).toHaveBeenCalled()
     expect(sw.views.size).toBe(1)
     expect(sw.views.get(1)).toBe(expanding.actor)
+  })
+
+  it('reserves the right chat dock from the fullscreen video bounds', () => {
+    const sw = makeStreamWindow(
+      makeConfig({
+        cols: 1,
+        rows: 1,
+        tileCount: 1,
+        width: 1920,
+        height: 1080,
+      }),
+    )
+    sw.fullscreenChatVisible = true
+    sw.win = {
+      contentView: { removeChildView: vi.fn() },
+    } as unknown as InstanceType<typeof StreamWindow>['win']
+    const stream: ViewContent = {
+      url: 'https://www.twitch.tv/twitchdev',
+      kind: 'video',
+    }
+    const expanding = makeReuseTestActor({
+      id: 1,
+      content: stream,
+      spaces: [0],
+      running: true,
+    })
+    sw.views = new Map([[1, expanding.actor]])
+    sw.createView = vi.fn()
+
+    sw.setViews(
+      fullscreenViewContentMap(1, 1, stream),
+      { byURL: new Map([[stream.url, {}]]) },
+      { fillWall: true },
+    )
+
+    expect(expanding.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'DISPLAY',
+        pos: {
+          x: 0,
+          y: 0,
+          width: 1500,
+          height: 1080,
+          spaces: [0],
+        },
+      }),
+    )
   })
 })
 

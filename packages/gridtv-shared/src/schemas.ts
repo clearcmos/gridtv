@@ -124,6 +124,10 @@ export const wallControlCommandSchema = z.discriminatedUnion('type', [
     fullscreen: z.boolean(),
   }),
   z.object({
+    type: z.literal('set-wall-chat-visible'),
+    visible: z.boolean(),
+  }),
+  z.object({
     type: z.literal('swap-wall-streams'),
     fromViewIdx: z
       .number()
@@ -506,6 +510,7 @@ export const streamwallStateSchema = z.object({
   views: z.array(viewStateSchema),
   wallSlots: z.array(liveWallSlotStateSchema).max(LIVE_TILE_MAX).optional(),
   fullscreenViewIdx: viewIdxSchema.nullable(),
+  fullscreenChatVisible: z.boolean().optional(),
   streamdelay: streamDelayStatusSchema.nullable(),
   layoutPresets: z.array(layoutPresetSchema),
   favorites: z.array(z.string()),

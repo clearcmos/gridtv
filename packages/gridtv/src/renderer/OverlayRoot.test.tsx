@@ -419,6 +419,155 @@ describe('self-contained wall controls', () => {
     })
   })
 
+  test('F toggles fullscreen for the hovered stream', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    const views = [makeView(0, 'view-0'), makeView(1, 'view-1')]
+    const streams = [makeStream('view-0'), makeStream('view-1')]
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(2)}
+          views={views}
+          streams={streams}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+
+    act(() => {
+      container!
+        .querySelector('[data-view-idx="1"]')!
+        .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
+    })
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
+    })
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-fullscreen',
+      viewIdx: 1,
+      fullscreen: true,
+    })
+    expect(onControl).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(2)}
+          views={views}
+          streams={streams}
+          fullscreenViewIdx={1}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F' }))
+    })
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-fullscreen',
+      viewIdx: 1,
+      fullscreen: false,
+    })
+    expect(onControl).toHaveBeenCalledTimes(2)
+  })
+
+  test('E toggles mute for the hovered stream', () => {
+    const onControl = vi.fn()
+    const view = makeView(0, 'view-0')
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[view]}
+          streams={[makeStream('view-0')]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    act(() => {
+      container!
+        .querySelector('[data-wall-tile]')!
+        .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
+    })
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'e' }))
+    })
+
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-audio-mode',
+      viewId: 0,
+      viewIdx: 0,
+      mode: 'unmuted',
+    })
+  })
+
+  test('C toggles a right chat dock only for a fullscreen Twitch stream', () => {
+    const onControl = vi.fn()
+    const view = makeView(0, 'payo')
+    const stream = makeStream('payo')
+    view.context.content = {
+      url: 'https://www.twitch.tv/payo',
+      kind: 'video',
+    }
+    stream.link = view.context.content.url
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[view]}
+          streams={[stream]}
+          fullscreenViewIdx={0}
+          fullscreenChatVisible={false}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c' }))
+    })
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-chat-visible',
+      visible: true,
+    })
+
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[view]}
+          streams={[stream]}
+          fullscreenViewIdx={0}
+          fullscreenChatVisible
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    expect(
+      getComputedStyle(container.querySelector('[data-wall-tile]')!).width,
+    ).toBe('58px')
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'C' }))
+    })
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-chat-visible',
+      visible: false,
+    })
+  })
+
   test('dragging one tile onto another requests a swap', () => {
     const onControl = vi.fn()
     container = document.createElement('div')

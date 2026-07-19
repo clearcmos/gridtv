@@ -617,6 +617,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     views: [],
     wallSlots: [],
     fullscreenViewIdx: null,
+    fullscreenChatVisible: false,
     streamdelay: null,
     layoutPresets: db.data.layoutPresets,
     favorites: db.data.favorites,
@@ -624,8 +625,13 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   }
 
   function clearLiveWallFullscreen() {
+    streamWindow.setFullscreenChat(undefined, false)
     streamWindow.setTileNativeFullscreen(false)
-    clientState = { ...clientState, fullscreenViewIdx: null }
+    clientState = {
+      ...clientState,
+      fullscreenViewIdx: null,
+      fullscreenChatVisible: false,
+    }
   }
 
   function updateViewsFromStateDoc() {
@@ -952,20 +958,60 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   }
 
   function setLiveWallFullscreen(viewIdx: number, fullscreen: boolean) {
+    log.debug('Fullscreen diagnostic: wall fullscreen command', {
+      viewIdx,
+      fullscreen,
+      currentFullscreenViewIdx: clientState.fullscreenViewIdx,
+      nativeWindowFullscreen: streamWindow.win.isFullScreen(),
+    })
     if (viewIdx < 0 || viewIdx >= liveWallState.tileCount) {
+      log.debug('Fullscreen diagnostic: rejected out-of-range tile', {
+        viewIdx,
+        tileCount: liveWallState.tileCount,
+      })
       return
     }
     if (fullscreen && !viewsState.get(String(viewIdx))?.get('streamId')) {
+      log.debug('Fullscreen diagnostic: rejected unassigned tile', { viewIdx })
       return
     }
     if (fullscreen) {
+      streamWindow.setFullscreenChat(undefined, false)
       streamWindow.setTileNativeFullscreen(true)
-      updateState({ fullscreenViewIdx: viewIdx })
+      updateState({
+        fullscreenViewIdx: viewIdx,
+        fullscreenChatVisible: false,
+      })
     } else {
       clearLiveWallFullscreen()
       updateState({})
     }
     updateViewsFromStateDoc()
+    log.debug('Fullscreen diagnostic: command applied', {
+      fullscreenViewIdx: clientState.fullscreenViewIdx,
+      nativeWindowFullscreen: streamWindow.win.isFullScreen(),
+    })
+  }
+
+  function setLiveWallChatVisible(visible: boolean) {
+    const { fullscreenViewIdx } = clientState
+    const streamId =
+      fullscreenViewIdx == null
+        ? undefined
+        : viewsState.get(String(fullscreenViewIdx))?.get('streamId')
+    const stream = streamId
+      ? clientState.streams.find((candidate) => candidate._id === streamId)
+      : undefined
+    const channel = twitchLoginFromInput(stream?.link ?? '')
+    const nextVisible = visible && fullscreenViewIdx != null && channel != null
+
+    clientState = {
+      ...clientState,
+      fullscreenChatVisible: nextVisible,
+    }
+    streamWindow.setFullscreenChat(channel ?? undefined, nextVisible)
+    updateViewsFromStateDoc()
+    updateState({})
   }
 
   function swapLiveWallStreams(fromViewIdx: number, toViewIdx: number) {
@@ -1114,6 +1160,9 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       case 'set-wall-fullscreen':
         setLiveWallFullscreen(command.viewIdx, command.fullscreen)
         break
+      case 'set-wall-chat-visible':
+        setLiveWallChatVisible(command.visible)
+        break
       case 'swap-wall-streams':
         swapLiveWallStreams(command.fromViewIdx, command.toViewIdx)
         break
@@ -1126,6 +1175,10 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   streamWindow.on('control', persistWallMediaCommand)
   streamWindow.on('tileFullscreenExited', () => {
     const { fullscreenViewIdx } = clientState
+    log.debug('Fullscreen diagnostic: external native exit reported', {
+      fullscreenViewIdx,
+      nativeWindowFullscreen: streamWindow.win.isFullScreen(),
+    })
     if (fullscreenViewIdx != null) {
       setLiveWallFullscreen(fullscreenViewIdx, false)
     }

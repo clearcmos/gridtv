@@ -2,6 +2,7 @@ import assert from 'assert'
 import {
   BrowserWindow,
   Event as ElectronEvent,
+  Input,
   ipcMain,
   screen,
   WebContents,
@@ -34,6 +35,11 @@ import {
   DEFAULT_STREAM_MEDIA_CONFIG,
   type StreamMediaConfig,
 } from '../mediaConfig'
+import {
+  buildTwitchChatEmbedURL,
+  computeTwitchChatDockWidth,
+  TWITCH_CHAT_REFERRER,
+} from '../twitchChat'
 import { twitchQualityArgument } from '../twitchPlayer'
 import { devServerOrigin, loadHTML } from './loadHTML'
 import log from './logger'
@@ -128,6 +134,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   offscreenWin: BrowserWindow
   backgroundView: WebContentsView
   overlayView: WebContentsView
+  chatView: WebContentsView | undefined
+  chatChannel: string | undefined
+  fullscreenChatVisible: boolean
   views: Map<number, ViewActor>
   // Actors temporarily excluded from `views` (and therefore from
   // `emitState()`) while a fullscreen expansion hides them behind the
@@ -178,6 +187,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.tileNativeFullscreenEntered = false
     this.resizeSyncTimers = []
     this.initialMaximizeTimers = []
+    this.chatView = undefined
+    this.chatChannel = undefined
+    this.fullscreenChatVisible = false
 
     const {
       width,
@@ -212,18 +224,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
     win.removeMenu()
     win.loadURL('about:blank')
-    win.webContents.on('before-input-event', (event, input) => {
-      if (input.type === 'keyDown' && input.key === 'F1') {
-        event.preventDefault()
-        this.overlayView?.webContents.send('wall:grid-menu-shortcut')
-      } else if (input.type === 'keyDown' && input.key === 'F2') {
-        event.preventDefault()
-        this.overlayView?.webContents.send('wall:fit-mode-shortcut')
-      } else if (input.type === 'keyDown' && input.key === 'Escape') {
-        event.preventDefault()
-        this.overlayView?.webContents.send('wall:fullscreen-exit-shortcut')
-      }
-    })
+    win.webContents.on('before-input-event', (event, input) =>
+      this.forwardWallKeyboardShortcut(event, input),
+    )
     win.on('close', (event) => this.emit('close', event))
 
     win.once('ready-to-show', () => {
@@ -248,10 +251,20 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     win.on('restore', scheduleResizeSync)
     win.on('show', scheduleResizeSync)
     win.on('enter-full-screen', () => {
+      log.debug('Fullscreen diagnostic: Electron enter-full-screen event', {
+        nativeFullscreenBeforeTile: this.nativeFullscreenBeforeTile,
+        tileNativeFullscreenEntered: this.tileNativeFullscreenEntered,
+        isFullScreen: win.isFullScreen(),
+      })
       scheduleResizeSync()
       this.handleNativeFullscreenEnter()
     })
     win.on('leave-full-screen', () => {
+      log.debug('Fullscreen diagnostic: Electron leave-full-screen event', {
+        nativeFullscreenBeforeTile: this.nativeFullscreenBeforeTile,
+        tileNativeFullscreenEntered: this.tileNativeFullscreenEntered,
+        isFullScreen: win.isFullScreen(),
+      })
       scheduleResizeSync()
       this.handleNativeFullscreenExit()
     })
@@ -273,6 +286,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (!offscreenWin.isDestroyed()) {
         offscreenWin.destroy()
       }
+      if (this.chatView && !this.chatView.webContents.isDestroyed()) {
+        this.chatView.webContents.close()
+      }
     })
 
     const backgroundView = new WebContentsView({
@@ -290,18 +306,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
     loadHTML(backgroundView.webContents, 'background')
     this.backgroundView = backgroundView
-    backgroundView.webContents.on('before-input-event', (event, input) => {
-      if (input.type === 'keyDown' && input.key === 'F1') {
-        event.preventDefault()
-        this.overlayView?.webContents.send('wall:grid-menu-shortcut')
-      } else if (input.type === 'keyDown' && input.key === 'F2') {
-        event.preventDefault()
-        this.overlayView?.webContents.send('wall:fit-mode-shortcut')
-      } else if (input.type === 'keyDown' && input.key === 'Escape') {
-        event.preventDefault()
-        this.overlayView?.webContents.send('wall:fullscreen-exit-shortcut')
-      }
-    })
+    backgroundView.webContents.on('before-input-event', (event, input) =>
+      this.forwardWallKeyboardShortcut(event, input),
+    )
 
     const overlayView = new WebContentsView({
       webPreferences: {
@@ -319,6 +326,10 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
     loadHTML(overlayView.webContents, 'overlay')
     this.overlayView = overlayView
+    // The overlay renderer handles its own keyboard events. Forwarding the
+    // same event back to it here makes one F, E, or C press run twice. Stream
+    // and background views still need the main-process forwarding path because
+    // they cannot issue trusted wall-control commands themselves.
 
     ipcMain.handle('layer:load', (ev) => {
       if (
@@ -404,6 +415,117 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
   }
 
+  private forwardWallKeyboardShortcut(
+    event: ElectronEvent,
+    input: Input,
+    includeTileKeys = true,
+  ) {
+    if (input.type !== 'keyDown' || input.isAutoRepeat) {
+      return
+    }
+    if (input.key === 'F1') {
+      event.preventDefault()
+      this.overlayView?.webContents.send('wall:grid-menu-shortcut')
+    } else if (input.key === 'F2') {
+      event.preventDefault()
+      this.overlayView?.webContents.send('wall:fit-mode-shortcut')
+    } else if (input.key === 'Escape') {
+      event.preventDefault()
+      this.overlayView?.webContents.send('wall:fullscreen-exit-shortcut')
+    } else if (
+      includeTileKeys &&
+      !input.alt &&
+      !input.control &&
+      !input.meta &&
+      ['f', 'e', 'c'].includes(input.key.toLowerCase())
+    ) {
+      event.preventDefault()
+      this.overlayView?.webContents.send('wall:tile-key-shortcut', input.key)
+    }
+  }
+
+  private syncOverlayAndChatBounds() {
+    const { width, height } = this.config
+    const chatWidth = this.fullscreenChatVisible
+      ? computeTwitchChatDockWidth(width)
+      : 0
+    this.overlayView.setBounds({
+      x: 0,
+      y: 0,
+      width: width - chatWidth,
+      height,
+    })
+    if (this.fullscreenChatVisible && this.chatView) {
+      this.chatView.setBounds({
+        x: width - chatWidth,
+        y: 0,
+        width: chatWidth,
+        height,
+      })
+    }
+  }
+
+  /** Shows or hides the interactive Twitch chat dock beside fullscreen video. */
+  setFullscreenChat(channel: string | undefined, visible: boolean) {
+    const shouldShow = visible && channel !== undefined
+    this.fullscreenChatVisible = shouldShow
+
+    if (!shouldShow) {
+      if (
+        this.chatView &&
+        this.win.contentView.children.includes(this.chatView)
+      ) {
+        this.win.contentView.removeChildView(this.chatView)
+      }
+      this.syncOverlayAndChatBounds()
+      return
+    }
+
+    if (!this.chatView) {
+      const chatView = new WebContentsView({
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          backgroundThrottling: false,
+          partition: streamViewPartition(this.mediaConfig.sessionMode),
+        },
+      })
+      chatView.setBackgroundColor('#18181b')
+      hardenSession(chatView.webContents.session)
+      secureStreamView(chatView.webContents)
+      // Keep function keys available after the operator clicks into chat, but
+      // leave letter keys alone so the chat input remains fully usable.
+      chatView.webContents.on('before-input-event', (event, input) =>
+        this.forwardWallKeyboardShortcut(event, input, false),
+      )
+      this.chatView = chatView
+    }
+
+    const chatView = this.chatView
+    if (!this.win.contentView.children.includes(chatView)) {
+      const overlayIndex = this.win.contentView.children.indexOf(
+        this.overlayView,
+      )
+      this.win.contentView.addChildView(
+        chatView,
+        overlayIndex === -1
+          ? this.win.contentView.children.length
+          : overlayIndex,
+      )
+    }
+    this.syncOverlayAndChatBounds()
+
+    if (this.chatChannel !== channel) {
+      this.chatChannel = channel
+      void chatView.webContents
+        .loadURL(buildTwitchChatEmbedURL(channel), {
+          httpReferrer: TWITCH_CHAT_REFERRER,
+        })
+        .catch((error) => log.warn('Failed to load Twitch chat:', error))
+    }
+  }
+
   handleResize() {
     if (this.win.isDestroyed()) {
       return
@@ -427,7 +549,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.config.width = width
     this.config.height = height
     this.backgroundView.setBounds({ x: 0, y: 0, width, height })
-    this.overlayView.setBounds({ x: 0, y: 0, width, height })
+    this.syncOverlayAndChatBounds()
     this.offscreenWin.setContentSize(width, height)
     // Let the main process re-layout the stream views and rebroadcast state
     // (config is shared by reference, so the overlay gets the new dimensions).
@@ -492,6 +614,12 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     if (this.win.isDestroyed()) {
       return
     }
+    log.debug('Fullscreen diagnostic: native fullscreen request', {
+      enabled,
+      isFullScreen: this.win.isFullScreen(),
+      nativeFullscreenBeforeTile: this.nativeFullscreenBeforeTile,
+      tileNativeFullscreenEntered: this.tileNativeFullscreenEntered,
+    })
     if (enabled) {
       if (this.nativeFullscreenBeforeTile !== undefined) {
         return
@@ -582,18 +710,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     // Lock the view to its stream URL: deny popups and block navigation/redirect
     // escapes while still allowing the page to reload itself.
     secureStreamView(view.webContents)
-    view.webContents.on('before-input-event', (event, input) => {
-      if (input.type === 'keyDown' && input.key === 'F1') {
-        event.preventDefault()
-        this.overlayView.webContents.send('wall:grid-menu-shortcut')
-      } else if (input.type === 'keyDown' && input.key === 'F2') {
-        event.preventDefault()
-        this.overlayView.webContents.send('wall:fit-mode-shortcut')
-      } else if (input.type === 'keyDown' && input.key === 'Escape') {
-        event.preventDefault()
-        this.overlayView.webContents.send('wall:fullscreen-exit-shortcut')
-      }
-    })
+    view.webContents.on('before-input-event', (event, input) =>
+      this.forwardWallKeyboardShortcut(event, input),
+    )
 
     return { view, offscreenWin: this.offscreenWin }
   }
@@ -777,13 +896,18 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     const gridBoxes = boxesFromViewContentMap(cols, rows, viewContentMap)
     const firstContent = viewContentMap.values().next().value as
       ViewContent | undefined
+    const fullscreenWidth =
+      width -
+      (fillWall && this.fullscreenChatVisible
+        ? computeTwitchChatDockWidth(width)
+        : 0)
     const boxes = fillWall
       ? firstContent
         ? [
             {
               content: firstContent,
               spaces: [...Array(tileCount ?? Math.max(1, cols * rows)).keys()],
-              rect: { x: 0, y: 0, width, height },
+              rect: { x: 0, y: 0, width: fullscreenWidth, height },
             },
           ]
         : []
@@ -1044,6 +1168,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       case 'set-wall-tile-count':
       case 'set-wall-stream':
       case 'set-wall-fullscreen':
+      case 'set-wall-chat-visible':
       case 'swap-wall-streams':
       case 'resize-wall-tile':
         // Main owns the persisted layout/source data and handles these after

@@ -171,6 +171,7 @@ describe('wallControlCommandSchema', () => {
       { type: 'set-wall-tile-count', count: 7 },
       { type: 'set-wall-stream', viewIdx: 2, username: 'lacy' },
       { type: 'set-wall-fullscreen', viewIdx: 2, fullscreen: true },
+      { type: 'set-wall-chat-visible', visible: true },
       { type: 'swap-wall-streams', fromViewIdx: 2, toViewIdx: 5 },
       { type: 'resize-wall-tile', viewIdx: 2, targetViewIdx: 5 },
     ]) {
@@ -196,6 +197,7 @@ describe('wallControlCommandSchema', () => {
       { type: 'set-wall-tile-count', count: 10 },
       { type: 'set-wall-stream', viewIdx: 9, username: 'lacy' },
       { type: 'set-wall-fullscreen', viewIdx: 9, fullscreen: true },
+      { type: 'set-wall-chat-visible', visible: 'yes' },
       { type: 'swap-wall-streams', fromViewIdx: -1, toViewIdx: 2 },
       { type: 'resize-wall-tile', viewIdx: 2, targetViewIdx: 9 },
       { type: 'unknown-wall-command', viewId: 1 },

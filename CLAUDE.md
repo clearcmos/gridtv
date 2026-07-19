@@ -28,8 +28,11 @@ The public repository is `clearcmos/gridtv`. Use it as `origin`; keep
 - Left-drag swaps streams. Right-drag stretches one stream across adjacent
   cells; repeated stream IDs in saved Yjs state encode that span. Selecting the
   current tile count again collapses spans into distinct cells.
-- F2 toggles wall-wide Fit and Fill. Double-click toggles native fullscreen for
-  one stream. Escape restores the wall.
+- F2 toggles wall-wide Fit and Fill. F or double-click toggles native
+  fullscreen for the hovered stream. E toggles its mute state. Escape restores
+  the wall.
+- C shows or hides an interactive Twitch chat dock on the right of a fullscreen
+  stream. The dock is runtime-only and the video resizes to the remaining area.
 - Twitch channel URLs use the lightweight player and source quality by default.
   Both are configurable.
 - Assignments and per-tile media settings persist in `streamwall-storage.json`

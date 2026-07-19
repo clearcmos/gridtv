@@ -16,11 +16,12 @@ import { FaEdit, FaPlus, FaVideoSlash } from 'react-icons/fa'
 import { styled } from 'styled-components'
 import { matchesState } from 'xstate'
 import packageInfo from '../../package.json'
+import { computeTwitchChatDockWidth } from '../twitchChat'
 import { GridSizeMenu } from './GridSizeMenu'
 import { LAYER_FRAME_SANDBOX } from './layerFrameSandbox'
 import { OverlayViewTile } from './OverlayViewTile'
 import { StreamPickerDialog } from './StreamPickerDialog'
-import { WallMediaControls } from './WallMediaControls'
+import { nextWallAudioMode, WallMediaControls } from './WallMediaControls'
 
 /** Matches familiar video-player UX without making controls feel twitchy. */
 export const WALL_CHROME_IDLE_MS = 2500
@@ -47,20 +48,28 @@ export function Overlay({
   streams,
   wallSlots = [],
   fullscreenViewIdx,
+  fullscreenChatVisible = false,
   onControl,
   onSearchTwitch = async () => [],
   gridMenuShortcut = 0,
   fitModeShortcut = 0,
   fullscreenExitShortcut = 0,
+  tileKeyShortcut,
 }: Pick<
   StreamwallState,
-  'config' | 'views' | 'streams' | 'wallSlots' | 'fullscreenViewIdx'
+  | 'config'
+  | 'views'
+  | 'streams'
+  | 'wallSlots'
+  | 'fullscreenViewIdx'
+  | 'fullscreenChatVisible'
 > & {
   onControl: (command: WallControlCommand) => void
   onSearchTwitch?: (query: string) => Promise<TwitchChannelSuggestion[]>
   gridMenuShortcut?: number
   fitModeShortcut?: number
   fullscreenExitShortcut?: number
+  tileKeyShortcut?: { key: string; sequence: number }
 }) {
   const { width, height } = config
   const tileCount = config.tileCount ?? config.cols * config.rows
@@ -79,6 +88,7 @@ export function Overlay({
   const [visibleChromeViewIdx, setVisibleChromeViewIdx] = useState<
     number | null
   >(null)
+  const [hoveredViewIdx, setHoveredViewIdx] = useState<number | null>(null)
   const chromeIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   )
@@ -93,6 +103,7 @@ export function Overlay({
   } | null>(null)
   const suppressDoubleClickUntil = useRef(0)
   const lastFitModeShortcut = useRef(0)
+  const lastTileKeyShortcut = useRef(0)
 
   const cycleWallFitMode = useCallback(() => {
     if (fullscreenViewIdx != null) {
@@ -127,6 +138,64 @@ export function Overlay({
 
   useEffect(() => () => clearChromeIdleTimer(), [])
 
+  const runTileKeyShortcut = useCallback(
+    (rawKey: string) => {
+      const key = rawKey.toLowerCase()
+      if (key === 'c') {
+        if (fullscreenViewIdx == null) {
+          return false
+        }
+        const fullscreenView = views.find(({ context }) =>
+          context.pos?.spaces.includes(fullscreenViewIdx),
+        )
+        if (!twitchLoginFromInput(fullscreenView?.context.content?.url ?? '')) {
+          return false
+        }
+        onControl({
+          type: 'set-wall-chat-visible',
+          visible: !fullscreenChatVisible,
+        })
+        return true
+      }
+
+      if (key !== 'f' && key !== 'e') {
+        return false
+      }
+      const targetViewIdx = fullscreenViewIdx ?? hoveredViewIdx
+      if (targetViewIdx == null) {
+        return false
+      }
+      const targetView = views.find(({ context }) =>
+        context.pos?.spaces.includes(targetViewIdx),
+      )
+      if (!targetView?.context.content) {
+        return false
+      }
+      if (key === 'f') {
+        onControl({
+          type: 'set-wall-fullscreen',
+          viewIdx: targetViewIdx,
+          fullscreen: fullscreenViewIdx == null,
+        })
+      } else {
+        onControl({
+          type: 'set-wall-audio-mode',
+          viewId: targetView.context.id,
+          viewIdx: targetViewIdx,
+          mode: nextWallAudioMode(targetView.context.wallAudioMode ?? 'muted'),
+        })
+      }
+      return true
+    },
+    [
+      fullscreenChatVisible,
+      fullscreenViewIdx,
+      hoveredViewIdx,
+      onControl,
+      views,
+    ],
+  )
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'F1') {
@@ -148,6 +217,19 @@ export function Overlay({
             fullscreen: false,
           })
         }
+      } else if (
+        !event.repeat &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !(
+          event.target instanceof HTMLElement &&
+          (event.target.matches('input, textarea, select') ||
+            event.target.isContentEditable)
+        ) &&
+        runTileKeyShortcut(event.key)
+      ) {
+        event.preventDefault()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -158,6 +240,7 @@ export function Overlay({
     isGridMenuOpen,
     onControl,
     pickerViewIdx,
+    runTileKeyShortcut,
   ])
 
   useEffect(() => {
@@ -183,6 +266,16 @@ export function Overlay({
       })
     }
   }, [fullscreenExitShortcut, fullscreenViewIdx, onControl])
+
+  useEffect(() => {
+    if (
+      tileKeyShortcut &&
+      tileKeyShortcut.sequence > lastTileKeyShortcut.current
+    ) {
+      lastTileKeyShortcut.current = tileKeyShortcut.sequence
+      runTileKeyShortcut(tileKeyShortcut.key)
+    }
+  }, [runTileKeyShortcut, tileKeyShortcut])
 
   // Keep error views on the wall (instead of leaving a silent black cell) so the
   // failure and its reason are visible; they are rendered as an error tile below.
@@ -370,8 +463,14 @@ export function Overlay({
             event.preventDefault()
           }
         }}
-        onPointerEnter={() => showTileChrome(viewIdx)}
-        onPointerLeave={() => hideTileChrome(viewIdx)}
+        onPointerEnter={() => {
+          setHoveredViewIdx(viewIdx)
+          showTileChrome(viewIdx)
+        }}
+        onPointerLeave={() => {
+          setHoveredViewIdx((current) => (current === viewIdx ? null : current))
+          hideTileChrome(viewIdx)
+        }}
         onFocusCapture={() => showTileChrome(viewIdx)}
         onPointerUp={handlePointerFinish}
         onPointerCancel={clearTileGesture}
@@ -504,7 +603,9 @@ export function Overlay({
             {
               x: 0,
               y: 0,
-              width,
+              width:
+                width -
+                (fullscreenChatVisible ? computeTwitchChatDockWidth(width) : 0),
               height,
               spaces: [fullscreenViewIdx],
             },
