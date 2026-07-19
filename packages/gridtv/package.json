@@ -1,6 +1,7 @@
 {
   "name": "gridtv",
   "productName": "gridtv",
+  "desktopName": "gridtv.desktop",
   "version": "0.9.1",
   "description": "Self-contained Twitch livestream video wall",
   "main": ".vite/build/index.js",

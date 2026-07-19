@@ -25,6 +25,13 @@ import { nextWallAudioMode, WallMediaControls } from './WallMediaControls'
 
 /** Matches familiar video-player UX without making controls feel twitchy. */
 export const WALL_CHROME_IDLE_MS = 2500
+/**
+ * Electron can surface one physical keypress through a focused stream view's
+ * `before-input-event` and the overlay DOM in quick succession. Treat those
+ * cross-source copies as one shortcut while preserving deliberate repeated
+ * presses from the same source.
+ */
+export const TILE_KEY_DUPLICATE_WINDOW_MS = 100
 
 /** A mixed wall normalizes to Fill first; a uniformly filled wall cycles to Fit. */
 export function nextWallFitModeForViews(
@@ -104,6 +111,11 @@ export function Overlay({
   const suppressDoubleClickUntil = useRef(0)
   const lastFitModeShortcut = useRef(0)
   const lastTileKeyShortcut = useRef(0)
+  const recentTileKeyExecution = useRef<{
+    key: string
+    source: 'dom' | 'forwarded'
+    at: number
+  }>()
 
   const cycleWallFitMode = useCallback(() => {
     if (fullscreenViewIdx != null) {
@@ -139,8 +151,24 @@ export function Overlay({
   useEffect(() => () => clearChromeIdleTimer(), [])
 
   const runTileKeyShortcut = useCallback(
-    (rawKey: string) => {
+    (rawKey: string, source: 'dom' | 'forwarded') => {
       const key = rawKey.toLowerCase()
+      if (key !== 'f' && key !== 'e' && key !== 'c') {
+        return false
+      }
+
+      const now = Date.now()
+      const recent = recentTileKeyExecution.current
+      if (
+        recent &&
+        recent.key === key &&
+        recent.source !== source &&
+        now - recent.at < TILE_KEY_DUPLICATE_WINDOW_MS
+      ) {
+        return true
+      }
+      recentTileKeyExecution.current = { key, source, at: now }
+
       if (key === 'c') {
         if (fullscreenViewIdx == null) {
           return false
@@ -158,9 +186,6 @@ export function Overlay({
         return true
       }
 
-      if (key !== 'f' && key !== 'e') {
-        return false
-      }
       const targetViewIdx = fullscreenViewIdx ?? hoveredViewIdx
       if (targetViewIdx == null) {
         return false
@@ -227,7 +252,7 @@ export function Overlay({
           (event.target.matches('input, textarea, select') ||
             event.target.isContentEditable)
         ) &&
-        runTileKeyShortcut(event.key)
+        runTileKeyShortcut(event.key, 'dom')
       ) {
         event.preventDefault()
       }
@@ -273,7 +298,7 @@ export function Overlay({
       tileKeyShortcut.sequence > lastTileKeyShortcut.current
     ) {
       lastTileKeyShortcut.current = tileKeyShortcut.sequence
-      runTileKeyShortcut(tileKeyShortcut.key)
+      runTileKeyShortcut(tileKeyShortcut.key, 'forwarded')
     }
   }, [runTileKeyShortcut, tileKeyShortcut])
 

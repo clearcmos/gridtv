@@ -6,6 +6,7 @@ import { FusesPlugin } from '@electron-forge/plugin-fuses'
 import { VitePlugin } from '@electron-forge/plugin-vite'
 import type { ForgeConfig } from '@electron-forge/shared-types'
 import { FuseV1Options, FuseVersion } from '@electron/fuses'
+import path from 'node:path'
 
 import { parseGithubRepository } from './forge.publisher'
 import {
@@ -19,19 +20,25 @@ const macSigning = getMacSigningConfig(process.env)
 const windowsSigning = getWindowsSigningConfig(process.env)
 const signingConfigured = isSigningConfigured(process.env)
 const publishRepository = parseGithubRepository(packageJson.repository)
+const linuxIconPath = path.resolve(__dirname, 'assets/icon.png')
 
 const config: ForgeConfig = {
   packagerConfig: {
     executableName: 'gridtv',
     asar: true,
+    extraResource: [linuxIconPath],
     ...macSigning,
   },
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({ ...windowsSigning }),
     new MakerZIP({}, ['darwin']),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerRpm({
+      options: { icon: linuxIconPath, categories: ['AudioVideo', 'Video'] },
+    }),
+    new MakerDeb({
+      options: { icon: linuxIconPath, categories: ['AudioVideo', 'Video'] },
+    }),
   ],
   publishers: [
     {

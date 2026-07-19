@@ -476,6 +476,78 @@ describe('self-contained wall controls', () => {
     expect(onControl).toHaveBeenCalledTimes(2)
   })
 
+  test('deduplicates a DOM tile key followed by its forwarded copy', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    try {
+      const onControl = vi.fn()
+      container = document.createElement('div')
+      document.body.appendChild(container)
+      const props = {
+        config: makeConfig(1),
+        views: [makeView(0, 'view-0')],
+        streams: [makeStream('view-0')],
+        fullscreenViewIdx: null,
+        onControl,
+      }
+      act(() => render(<Overlay {...props} />, container!))
+      act(() => {
+        container!
+          .querySelector('[data-wall-tile]')!
+          .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
+      })
+
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
+      })
+      act(() => {
+        render(
+          <Overlay {...props} tileKeyShortcut={{ key: 'f', sequence: 1 }} />,
+          container!,
+        )
+      })
+
+      expect(onControl).toHaveBeenCalledTimes(1)
+    } finally {
+      now.mockRestore()
+    }
+  })
+
+  test('deduplicates a forwarded tile key followed by its DOM copy', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    try {
+      const onControl = vi.fn()
+      container = document.createElement('div')
+      document.body.appendChild(container)
+      const props = {
+        config: makeConfig(1),
+        views: [makeView(0, 'view-0')],
+        streams: [makeStream('view-0')],
+        fullscreenViewIdx: null,
+        onControl,
+      }
+      act(() => render(<Overlay {...props} />, container!))
+      act(() => {
+        container!
+          .querySelector('[data-wall-tile]')!
+          .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
+      })
+
+      act(() => {
+        render(
+          <Overlay {...props} tileKeyShortcut={{ key: 'f', sequence: 1 }} />,
+          container!,
+        )
+      })
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
+      })
+
+      expect(onControl).toHaveBeenCalledTimes(1)
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   test('E toggles mute for the hovered stream', () => {
     const onControl = vi.fn()
     const view = makeView(0, 'view-0')

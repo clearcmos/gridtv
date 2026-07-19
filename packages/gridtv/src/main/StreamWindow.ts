@@ -1,5 +1,6 @@
 import assert from 'assert'
 import {
+  app,
   BrowserWindow,
   Event as ElectronEvent,
   Input,
@@ -219,13 +220,16 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       fullscreen: placement.fullscreen,
       frame: !frameless,
       backgroundColor,
+      icon: app.isPackaged
+        ? path.join(process.resourcesPath, 'icon.png')
+        : path.join(app.getAppPath(), 'assets', 'icon.png'),
       useContentSize: true,
       show: false,
     })
     win.removeMenu()
     win.loadURL('about:blank')
     win.webContents.on('before-input-event', (event, input) =>
-      this.forwardWallKeyboardShortcut(event, input),
+      this.forwardWallKeyboardShortcut(event, input, 'window'),
     )
     win.on('close', (event) => this.emit('close', event))
 
@@ -307,7 +311,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     loadHTML(backgroundView.webContents, 'background')
     this.backgroundView = backgroundView
     backgroundView.webContents.on('before-input-event', (event, input) =>
-      this.forwardWallKeyboardShortcut(event, input),
+      this.forwardWallKeyboardShortcut(event, input, 'background'),
     )
 
     const overlayView = new WebContentsView({
@@ -418,6 +422,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   private forwardWallKeyboardShortcut(
     event: ElectronEvent,
     input: Input,
+    source: 'window' | 'background' | 'stream' | 'chat',
     includeTileKeys = true,
   ) {
     if (input.type !== 'keyDown' || input.isAutoRepeat) {
@@ -439,6 +444,10 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       !input.meta &&
       ['f', 'e', 'c'].includes(input.key.toLowerCase())
     ) {
+      log.debug('Fullscreen diagnostic: forwarding tile key', {
+        key: input.key,
+        source,
+      })
       event.preventDefault()
       this.overlayView?.webContents.send('wall:tile-key-shortcut', input.key)
     }
@@ -497,7 +506,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       // Keep function keys available after the operator clicks into chat, but
       // leave letter keys alone so the chat input remains fully usable.
       chatView.webContents.on('before-input-event', (event, input) =>
-        this.forwardWallKeyboardShortcut(event, input, false),
+        this.forwardWallKeyboardShortcut(event, input, 'chat', false),
       )
       this.chatView = chatView
     }
@@ -711,7 +720,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     // escapes while still allowing the page to reload itself.
     secureStreamView(view.webContents)
     view.webContents.on('before-input-event', (event, input) =>
-      this.forwardWallKeyboardShortcut(event, input),
+      this.forwardWallKeyboardShortcut(event, input, 'stream'),
     )
 
     return { view, offscreenWin: this.offscreenWin }
