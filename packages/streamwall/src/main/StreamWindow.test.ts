@@ -59,6 +59,8 @@ function makeStreamWindow(config: StreamWindowConfig) {
   sw.pauseParkedViews = false
   sw.resizeSyncTimers = []
   sw.initialMaximizeTimers = []
+  sw.nativeFullscreenBeforeTile = undefined
+  sw.tileNativeFullscreenEntered = false
   return sw
 }
 
@@ -276,6 +278,7 @@ describe('StreamWindow tile native fullscreen', () => {
     return {
       sw,
       setFullScreen,
+      acknowledgeEntry: () => sw.handleNativeFullscreenEnter(),
       leaveExternally: () => {
         isFullscreen = false
         sw.handleNativeFullscreenExit()
@@ -304,10 +307,12 @@ describe('StreamWindow tile native fullscreen', () => {
   })
 
   it('reports an external native-fullscreen exit exactly once', () => {
-    const { sw, setFullScreen, leaveExternally } = makeFullscreenHarness(false)
+    const { sw, setFullScreen, acknowledgeEntry, leaveExternally } =
+      makeFullscreenHarness(false)
     const emit = vi.spyOn(sw, 'emit')
     sw.setTileNativeFullscreen(true)
 
+    acknowledgeEntry()
     leaveExternally()
     sw.setTileNativeFullscreen(false)
     sw.handleNativeFullscreenExit()
@@ -315,6 +320,32 @@ describe('StreamWindow tile native fullscreen', () => {
     expect(emit).toHaveBeenCalledTimes(1)
     expect(emit).toHaveBeenCalledWith('tileFullscreenExited')
     expect(setFullScreen.mock.calls).toEqual([[true]])
+  })
+
+  it('ignores a stale Wayland leave event until fullscreen entry is acknowledged', () => {
+    const sw = makeStreamWindow(makeConfig())
+    let isFullscreen = false
+    const setFullScreen = vi.fn()
+    sw.win = {
+      isDestroyed: () => false,
+      isFullScreen: () => isFullscreen,
+      setFullScreen,
+    } as unknown as InstanceType<typeof StreamWindow>['win']
+    const emit = vi.spyOn(sw, 'emit')
+
+    sw.setTileNativeFullscreen(true)
+    sw.handleNativeFullscreenExit()
+
+    expect(emit).not.toHaveBeenCalledWith('tileFullscreenExited')
+    expect(sw.nativeFullscreenBeforeTile).toBe(false)
+
+    isFullscreen = true
+    sw.handleNativeFullscreenEnter()
+    isFullscreen = false
+    sw.handleNativeFullscreenExit()
+
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith('tileFullscreenExited')
   })
 
   it('cancels a pending Wayland fullscreen entry when collapse happens first', () => {

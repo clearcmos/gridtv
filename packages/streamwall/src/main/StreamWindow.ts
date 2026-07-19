@@ -155,6 +155,10 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   // whether the wall was already fullscreen before that tile was expanded, so
   // collapsing it can restore the exact previous window mode.
   nativeFullscreenBeforeTile: boolean | undefined
+  // Wayland may emit a stale leave-full-screen event while an asynchronous
+  // fullscreen request is still pending. Only a leave after an acknowledged
+  // entry is a real external exit.
+  tileNativeFullscreenEntered: boolean
 
   constructor(
     config: StreamWindowConfig,
@@ -171,6 +175,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.parkedViews = new Map()
     this.viewsByWebContentsId = new Map()
     this.nativeFullscreenBeforeTile = undefined
+    this.tileNativeFullscreenEntered = false
     this.resizeSyncTimers = []
     this.initialMaximizeTimers = []
 
@@ -242,7 +247,10 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     win.on('unmaximize', scheduleResizeSync)
     win.on('restore', scheduleResizeSync)
     win.on('show', scheduleResizeSync)
-    win.on('enter-full-screen', scheduleResizeSync)
+    win.on('enter-full-screen', () => {
+      scheduleResizeSync()
+      this.handleNativeFullscreenEnter()
+    })
     win.on('leave-full-screen', () => {
       scheduleResizeSync()
       this.handleNativeFullscreenExit()
@@ -490,7 +498,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       }
       const wasFullscreen = this.win.isFullScreen()
       this.nativeFullscreenBeforeTile = wasFullscreen
+      this.tileNativeFullscreenEntered = wasFullscreen
       if (!wasFullscreen) {
+        log.debug('Requesting native fullscreen for expanded tile...')
         this.win.setFullScreen(true)
       }
       return
@@ -504,6 +514,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     // `leave-full-screen` event is asynchronous and must not be mistaken for
     // an external compositor/window-manager exit.
     this.nativeFullscreenBeforeTile = undefined
+    this.tileNativeFullscreenEntered = false
     // Always send the windowed restore request: on Wayland isFullScreen() can
     // still report false while an earlier fullscreen request is in flight.
     if (!restoreFullscreen || !this.win.isFullScreen()) {
@@ -511,12 +522,29 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     }
   }
 
+  /** Records compositor acknowledgement of a pending tile-fullscreen entry. */
+  handleNativeFullscreenEnter() {
+    if (this.nativeFullscreenBeforeTile === undefined) {
+      return
+    }
+    this.tileNativeFullscreenEntered = true
+    log.debug('Native fullscreen entered for expanded tile.')
+  }
+
   /** Collapses the tile if native fullscreen is exited externally. */
   handleNativeFullscreenExit() {
     if (this.nativeFullscreenBeforeTile === undefined) {
       return
     }
+    if (!this.tileNativeFullscreenEntered) {
+      log.debug(
+        'Ignoring stale native fullscreen exit while entry is still pending.',
+      )
+      return
+    }
     this.nativeFullscreenBeforeTile = undefined
+    this.tileNativeFullscreenEntered = false
+    log.debug('Native fullscreen exited externally; collapsing expanded tile.')
     this.emit('tileFullscreenExited')
   }
 

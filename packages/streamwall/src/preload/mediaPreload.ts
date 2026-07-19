@@ -348,11 +348,11 @@ async function main() {
     // The media may live in a same-origin iframe document. Set the custom
     // property in both roots; VIDEO_OVERRIDE_STYLE consumes it from whichever
     // document owns the acquired element.
-    document.documentElement.style.setProperty(
+    document.documentElement?.style.setProperty(
       '--streamwall-object-fit',
       objectFit,
     )
-    currentMedia?.ownerDocument.documentElement.style.setProperty(
+    currentMedia?.ownerDocument.documentElement?.style.setProperty(
       '--streamwall-object-fit',
       objectFit,
     )
