@@ -82,7 +82,6 @@ $RECYCLE.BIN/
 *.orig
 
 # AI assistant / tooling files
-CLAUDE.md
 GEMINI.md
 AGENTS.md
 .claude/

@@ -25,6 +25,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
       - uses: ./.github/actions/setup
       - name: Lint
         run: npm run lint
@@ -47,7 +48,7 @@ jobs:
           - { name: linux, os: ubuntu-latest }
           - { name: windows, os: windows-latest }
           - { name: macos, os: macos-latest }
-    # Signing is opt-in (see packages/streamwall/forge.signing.ts): builds
+    # Signing is opt-in (see packages/gridtv/forge.signing.ts): builds
     # stay unsigned, exactly as before, until these secrets are provisioned.
     # `secrets` isn't available in step `if:` conditions, so the presence
     # checks are hoisted into job-level env vars here.
@@ -59,6 +60,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      - name: Install Linux maker dependencies
+        if: matrix.platform.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot rpm
+
       - uses: ./.github/actions/setup
 
       - name: Import macOS signing certificate
@@ -95,4 +103,4 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: npm -w streamwall run publish
+        run: npm -w gridtv run publish

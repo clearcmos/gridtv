@@ -64,11 +64,7 @@ export default tseslint.config(
     // "recommended" set), since v7's recommended config also pulls in
     // React Compiler-oriented rules (e.g. purity, immutability, gating)
     // that don't apply here — this project doesn't use the React Compiler.
-    files: [
-      'packages/streamwall-control-ui/src/**/*.{ts,tsx}',
-      'packages/streamwall-control-client/src/**/*.{ts,tsx}',
-      'packages/streamwall/src/renderer/**/*.{ts,tsx}',
-    ],
+    files: ['packages/gridtv/src/renderer/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
     },

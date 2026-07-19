@@ -36,9 +36,9 @@
 #rows = 3
 
 [control]
-# WebSocket URL (including the auth token) for the separate control server
-# that operators use to remotely arrange the grid. The control server prints
-# this URL to stdout on startup — copy it here verbatim.
+# WebSocket URL (including the auth token) for a compatible external Streamwall
+# control server. No control server is bundled with gridtv. Leave this unset for
+# the self-contained wall.
 #endpoint = "ws://localhost/streamwall/<id>/ws?token=<secret>"
 
 [data]
@@ -48,13 +48,13 @@
 # You can add URLs to fetch here:
 json-url = []
 
-# You can also specify .toml files on disk. Streamwall will reload the data whenever the file changes.
+# You can also specify .toml files on disk. gridtv will reload the data whenever the file changes.
 # See example.streams.toml for a sample.
 #toml-file = ["./example.streams.toml"]
 
 [retry]
 # Automatically reload views that fail to load or stall. Failed views show an
-# error badge with the reason on the wall and in the control UI while retrying.
+# error badge with the reason on the wall while retrying.
 #enabled = true
 
 # Base backoff (in seconds) before the first reload. The delay doubles after each
@@ -107,18 +107,16 @@ json-url = []
     #template = "Switching to #<%- selectedIdx %> (with <%- voteCount %> votes)"
     #interval = 15
 
-# Streamwall and streamwall-control-server speak plain HTTP/WebSocket only —
-# neither terminates TLS itself. For a remote `wss://` control endpoint, put a
-# reverse proxy (e.g. nginx, Caddy) in front to handle certificates and
-# forward to the plain-http server. See docs/self-hosting.md for a ready-made
-# Docker + Caddy setup.
+# The compatible Streamwall control server speaks plain HTTP/WebSocket. For a
+# remote `wss://` endpoint, put a reverse proxy such as nginx or Caddy in front
+# of that external server to terminate TLS.
 
 [streamdelay]
 #endpoint = "http://localhost:8404"
 #key = "super-secret"
 
 [telemetry]
-# Whether to report uncaught errors to Streamwall's Sentry project. Enabled
+# Whether to report uncaught errors to gridtv's Sentry project. Enabled
 # by default; uncomment to opt out.
 #sentry = false
 
