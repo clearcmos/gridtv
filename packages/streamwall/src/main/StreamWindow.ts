@@ -24,6 +24,7 @@ import {
   ViewContentMap,
   ViewState,
   wallControlCommandSchema,
+  type Rectangle,
   type WallAudioMode,
   type WallControlCommand,
   type WallFitMode,
@@ -35,6 +36,7 @@ import {
 } from '../mediaConfig'
 import { twitchQualityArgument } from '../twitchPlayer'
 import { devServerOrigin, loadHTML } from './loadHTML'
+import log from './logger'
 import { secureStreamView } from './navigationSecurity'
 import { hardenSession, streamViewPartition } from './partitions'
 import viewStateMachine, {
@@ -52,12 +54,63 @@ function getDisplayOptions(stream: StreamData): ContentDisplayOptions {
   return { rotation }
 }
 
+/**
+ * KDE/Wayland can briefly report a maximized content rectangle extending
+ * beneath a reserved panel. Clamp it to the display work area so the grid is
+ * laid out only inside pixels the operator can actually see.
+ */
+export function clampContentSizeToWorkArea(
+  contentSize: readonly [number, number],
+  contentBounds: Rectangle,
+  workArea: Rectangle,
+): [number, number] {
+  const left = Math.max(contentBounds.x, workArea.x)
+  const top = Math.max(contentBounds.y, workArea.y)
+  const right = Math.min(
+    contentBounds.x + contentBounds.width,
+    workArea.x + workArea.width,
+  )
+  const bottom = Math.min(
+    contentBounds.y + contentBounds.height,
+    workArea.y + workArea.height,
+  )
+  const visibleWidth = right - left
+  const visibleHeight = bottom - top
+  if (visibleWidth <= 0 || visibleHeight <= 0) {
+    // Some Wayland compositors intentionally withhold global window
+    // coordinates. In that case the intersection is meaningless, so retain
+    // Electron's reported content size and let the delayed probes converge.
+    return [contentSize[0], contentSize[1]]
+  }
+  return [
+    Math.min(contentSize[0], visibleWidth),
+    Math.min(contentSize[1], visibleHeight),
+  ]
+}
+
+/**
+ * Map the Wayland surface before requesting maximization. In the real KDE
+ * startup path a maximize request made while the window was still hidden was
+ * silently lost, leaving the 1920x1080 default window underneath the panel.
+ */
+export function showInitialStreamWindow(
+  win: Pick<BrowserWindow, 'show' | 'maximize'>,
+  fullscreen: boolean,
+) {
+  win.show()
+  if (!fullscreen) {
+    win.maximize()
+  }
+}
+
 export interface StreamWindowEventMap {
   load: []
   close: [ElectronEvent]
   state: [ViewState[]]
   resize: []
   control: [WallControlCommand]
+  /** Native fullscreen was left outside the normal tile-collapse path. */
+  tileFullscreenExited: []
 }
 
 export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
@@ -93,8 +146,15 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   // Wayland can emit maximize/restore before getContentSize() reflects the
   // compositor's final allocation. Keep short follow-up probes so every layer
   // converges without requiring a manual unmaximize/remaximize cycle.
-  resizeSyncTimer: ReturnType<typeof setTimeout> | undefined
-  lateResizeSyncTimer: ReturnType<typeof setTimeout> | undefined
+  resizeSyncTimers: Array<ReturnType<typeof setTimeout>>
+  // Native Wayland window-state requests are asynchronous and can be dropped
+  // during initial surface mapping. Retry briefly until KWin acknowledges the
+  // maximized state.
+  initialMaximizeTimers: Array<ReturnType<typeof setTimeout>>
+  // `undefined` means no tile owns native fullscreen. Otherwise this records
+  // whether the wall was already fullscreen before that tile was expanded, so
+  // collapsing it can restore the exact previous window mode.
+  nativeFullscreenBeforeTile: boolean | undefined
 
   constructor(
     config: StreamWindowConfig,
@@ -110,6 +170,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.views = new Map()
     this.parkedViews = new Map()
     this.viewsByWebContentsId = new Map()
+    this.nativeFullscreenBeforeTile = undefined
+    this.resizeSyncTimers = []
+    this.initialMaximizeTimers = []
 
     const {
       width,
@@ -148,6 +211,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (input.type === 'keyDown' && input.key === 'F1') {
         event.preventDefault()
         this.overlayView?.webContents.send('wall:grid-menu-shortcut')
+      } else if (input.type === 'keyDown' && input.key === 'F2') {
+        event.preventDefault()
+        this.overlayView?.webContents.send('wall:fit-mode-shortcut')
       } else if (input.type === 'keyDown' && input.key === 'Escape') {
         event.preventDefault()
         this.overlayView?.webContents.send('wall:fullscreen-exit-shortcut')
@@ -156,7 +222,14 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     win.on('close', (event) => this.emit('close', event))
 
     win.once('ready-to-show', () => {
-      win.show()
+      log.debug(
+        `Showing StreamWindow ${fullscreen ? 'fullscreen' : 'maximized'}...`,
+      )
+      showInitialStreamWindow(win, fullscreen)
+      if (!fullscreen) {
+        this.scheduleInitialMaximizeSync()
+      }
+      this.scheduleResizeSync()
     })
 
     // Keep the wall responsive: when the window is resized / maximized /
@@ -164,12 +237,18 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     // the new content area.
     const scheduleResizeSync = () => this.scheduleResizeSync()
     win.on('resize', scheduleResizeSync)
+    win.on('move', scheduleResizeSync)
     win.on('maximize', scheduleResizeSync)
     win.on('unmaximize', scheduleResizeSync)
     win.on('restore', scheduleResizeSync)
     win.on('show', scheduleResizeSync)
     win.on('enter-full-screen', scheduleResizeSync)
-    win.on('leave-full-screen', scheduleResizeSync)
+    win.on('leave-full-screen', () => {
+      scheduleResizeSync()
+      this.handleNativeFullscreenExit()
+    })
+    const handleDisplayMetricsChanged = () => scheduleResizeSync()
+    screen.on('display-metrics-changed', handleDisplayMetricsChanged)
 
     this.win = win
 
@@ -180,8 +259,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
     this.offscreenWin = offscreenWin
     win.on('closed', () => {
-      clearTimeout(this.resizeSyncTimer)
-      clearTimeout(this.lateResizeSyncTimer)
+      this.clearResizeSyncTimers()
+      this.clearInitialMaximizeTimers()
+      screen.off('display-metrics-changed', handleDisplayMetricsChanged)
       if (!offscreenWin.isDestroyed()) {
         offscreenWin.destroy()
       }
@@ -206,6 +286,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (input.type === 'keyDown' && input.key === 'F1') {
         event.preventDefault()
         this.overlayView?.webContents.send('wall:grid-menu-shortcut')
+      } else if (input.type === 'keyDown' && input.key === 'F2') {
+        event.preventDefault()
+        this.overlayView?.webContents.send('wall:fit-mode-shortcut')
       } else if (input.type === 'keyDown' && input.key === 'Escape') {
         event.preventDefault()
         this.overlayView?.webContents.send('wall:fullscreen-exit-shortcut')
@@ -317,7 +400,16 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     if (this.win.isDestroyed()) {
       return
     }
-    const [width, height] = this.win.getContentSize()
+    let [width, height] = this.win.getContentSize()
+    if (this.win.isMaximized() && !this.win.isFullScreen()) {
+      const contentBounds = this.win.getContentBounds()
+      const { workArea } = screen.getDisplayMatching(contentBounds)
+      ;[width, height] = clampContentSizeToWorkArea(
+        [width, height],
+        contentBounds,
+        workArea,
+      )
+    }
     if (width <= 0 || height <= 0) {
       return
     }
@@ -336,10 +428,96 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
 
   scheduleResizeSync() {
     this.handleResize()
-    clearTimeout(this.resizeSyncTimer)
-    clearTimeout(this.lateResizeSyncTimer)
-    this.resizeSyncTimer = setTimeout(() => this.handleResize(), 50)
-    this.lateResizeSyncTimer = setTimeout(() => this.handleResize(), 250)
+    this.clearResizeSyncTimers()
+    // KDE can finish its maximize/work-area negotiation well after the first
+    // resize event. Probe until the compositor has had ample time to settle.
+    this.resizeSyncTimers = [50, 250, 750, 1500].map((delay) =>
+      setTimeout(() => this.handleResize(), delay),
+    )
+  }
+
+  clearResizeSyncTimers() {
+    for (const timer of this.resizeSyncTimers) {
+      clearTimeout(timer)
+    }
+    this.resizeSyncTimers = []
+  }
+
+  scheduleInitialMaximizeSync() {
+    this.clearInitialMaximizeTimers()
+    this.initialMaximizeTimers = [50, 250, 750, 1500].map((delay) =>
+      setTimeout(() => {
+        if (this.win.isDestroyed() || this.win.isFullScreen()) {
+          return
+        }
+        if (!this.win.isMaximized()) {
+          log.debug(
+            `Retrying dropped initial maximize request after ${delay}ms...`,
+          )
+          this.win.maximize()
+        }
+        if (delay === 1500) {
+          log.debug('Initial StreamWindow geometry:', {
+            windowSize: this.win.getSize(),
+            contentSize: this.win.getContentSize(),
+            maximized: this.win.isMaximized(),
+            fullscreen: this.win.isFullScreen(),
+          })
+        }
+      }, delay),
+    )
+  }
+
+  clearInitialMaximizeTimers() {
+    for (const timer of this.initialMaximizeTimers) {
+      clearTimeout(timer)
+    }
+    this.initialMaximizeTimers = []
+  }
+
+  /**
+   * Gives a wall tile true OS-level fullscreen, then restores the wall's prior
+   * native window mode when that tile collapses. Repeated calls are idempotent
+   * so renderer/state refreshes cannot overwrite the original restore point.
+   */
+  setTileNativeFullscreen(enabled: boolean) {
+    if (this.win.isDestroyed()) {
+      return
+    }
+    if (enabled) {
+      if (this.nativeFullscreenBeforeTile !== undefined) {
+        return
+      }
+      const wasFullscreen = this.win.isFullScreen()
+      this.nativeFullscreenBeforeTile = wasFullscreen
+      if (!wasFullscreen) {
+        this.win.setFullScreen(true)
+      }
+      return
+    }
+
+    const restoreFullscreen = this.nativeFullscreenBeforeTile
+    if (restoreFullscreen === undefined) {
+      return
+    }
+    // Clear ownership before asking Electron to leave fullscreen. Its
+    // `leave-full-screen` event is asynchronous and must not be mistaken for
+    // an external compositor/window-manager exit.
+    this.nativeFullscreenBeforeTile = undefined
+    // Always send the windowed restore request: on Wayland isFullScreen() can
+    // still report false while an earlier fullscreen request is in flight.
+    if (!restoreFullscreen || !this.win.isFullScreen()) {
+      this.win.setFullScreen(restoreFullscreen)
+    }
+  }
+
+  /** Collapses the tile if native fullscreen is exited externally. */
+  handleNativeFullscreenExit() {
+    if (this.nativeFullscreenBeforeTile === undefined) {
+      return
+    }
+    this.nativeFullscreenBeforeTile = undefined
+    this.emit('tileFullscreenExited')
   }
 
   /**
@@ -380,6 +558,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       if (input.type === 'keyDown' && input.key === 'F1') {
         event.preventDefault()
         this.overlayView.webContents.send('wall:grid-menu-shortcut')
+      } else if (input.type === 'keyDown' && input.key === 'F2') {
+        event.preventDefault()
+        this.overlayView.webContents.send('wall:fit-mode-shortcut')
       } else if (input.type === 'keyDown' && input.key === 'Escape') {
         event.preventDefault()
         this.overlayView.webContents.send('wall:fullscreen-exit-shortcut')
@@ -788,6 +969,12 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.views.get(viewId)?.send({ type: 'SET_FIT_MODE', mode })
   }
 
+  setAllWallFitModes(mode: WallFitMode) {
+    for (const view of this.views.values()) {
+      view.send({ type: 'SET_FIT_MODE', mode })
+    }
+  }
+
   /** Restores persisted live-wall controls for the actor occupying one slot. */
   applyWallTileSettings(
     viewIdx: number,
@@ -822,6 +1009,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
         break
       case 'set-wall-fit-mode':
         this.setWallFitMode(command.viewId, command.mode)
+        break
+      case 'set-wall-fit-mode-all':
+        this.setAllWallFitModes(command.mode)
         break
       case 'set-wall-tile-count':
       case 'set-wall-stream':

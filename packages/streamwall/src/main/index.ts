@@ -76,6 +76,8 @@ import {
   swapLiveWallAssignments,
 } from './liveWallResize'
 import {
+  LIVE_WALL_FIT_MODE_VERSION,
+  applyDefaultFitModesForLayout,
   normalizeLiveWallState,
   remapLiveWallTileSettings,
   updateLiveWallTileSettings,
@@ -522,6 +524,8 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   )
 
   const needsLegacyWallMigration = db.data.liveWall == null
+  const needsFitModeDefaultsMigration =
+    db.data.liveWall?.fitModeVersion !== LIVE_WALL_FIT_MODE_VERSION
   const originalCustomStreamData = db.data.localStreamData
   const stableCustomStreamData = addStableCustomStreamIds(
     originalCustomStreamData,
@@ -619,6 +623,11 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     dataSourceHealth: [],
   }
 
+  function clearLiveWallFullscreen() {
+    streamWindow.setTileNativeFullscreen(false)
+    clientState = { ...clientState, fullscreenViewIdx: null }
+  }
+
   function updateViewsFromStateDoc() {
     try {
       // When a view is expanded to fullscreen (issue #362), override the
@@ -652,7 +661,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         // stale override so clients stop rendering a phantom expansion. The
         // setViews() below emits a state update that broadcasts the cleared
         // value.
-        clientState = { ...clientState, fullscreenViewIdx: null }
+        clearLiveWallFullscreen()
       }
       const viewContentMap = new Map()
       for (const [key, viewData] of viewsState) {
@@ -725,6 +734,15 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     liveWallState.tileCount,
     1,
   )
+
+  if (needsFitModeDefaultsMigration) {
+    const assignments = Array.from(
+      { length: liveWallState.tileCount },
+      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
+    )
+    applyDefaultFitModesForLayout(liveWallState, assignments)
+    persistLiveWall()
+  }
 
   updateViewsFromStateDoc()
   viewsState.observeDeep(updateViewsFromStateDoc)
@@ -807,7 +825,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   }
 
   function setLiveTileCount(count: number) {
-    clientState = { ...clientState, fullscreenViewIdx: null }
+    clearLiveWallFullscreen()
     const previousAssignments = Array.from(
       { length: liveWallState.tileCount },
       (_, idx) => viewsState.get(String(idx))?.get('streamId'),
@@ -940,7 +958,13 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     if (fullscreen && !viewsState.get(String(viewIdx))?.get('streamId')) {
       return
     }
-    updateState({ fullscreenViewIdx: fullscreen ? viewIdx : null })
+    if (fullscreen) {
+      streamWindow.setTileNativeFullscreen(true)
+      updateState({ fullscreenViewIdx: viewIdx })
+    } else {
+      clearLiveWallFullscreen()
+      updateState({})
+    }
     updateViewsFromStateDoc()
   }
 
@@ -960,7 +984,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     ) {
       return
     }
-    clientState = { ...clientState, fullscreenViewIdx: null }
+    clearLiveWallFullscreen()
     const previousAssignments = Array.from(
       { length: liveWallState.tileCount },
       (_, idx) => viewsState.get(String(idx))?.get('streamId'),
@@ -1002,7 +1026,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     if (!result.resized) {
       return
     }
-    clientState = { ...clientState, fullscreenViewIdx: null }
+    clearLiveWallFullscreen()
     const nextAssignments = Array.from(
       { length: liveWallState.tileCount },
       (_, idx) => viewsState.get(String(idx))?.get('streamId'),
@@ -1012,6 +1036,14 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       previousAssignments,
       nextAssignments,
     )
+    const resizedStreamId = previousAssignments[viewIdx]
+    if (resizedStreamId) {
+      applyDefaultFitModesForLayout(
+        liveWallState,
+        nextAssignments,
+        resizedStreamId,
+      )
+    }
     persistLiveWall()
     updateViewsFromStateDoc()
     updateState({})
@@ -1065,6 +1097,14 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         })
         persistLiveWall()
         break
+      case 'set-wall-fit-mode-all':
+        for (let idx = 0; idx < liveWallState.tileCount; idx++) {
+          updateLiveWallTileSettings(liveWallState, idx, {
+            fitMode: command.mode,
+          })
+        }
+        persistLiveWall()
+        break
       case 'set-wall-tile-count':
         setLiveTileCount(command.count)
         break
@@ -1084,6 +1124,12 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   }
 
   streamWindow.on('control', persistWallMediaCommand)
+  streamWindow.on('tileFullscreenExited', () => {
+    const { fullscreenViewIdx } = clientState
+    if (fullscreenViewIdx != null) {
+      setLiveWallFullscreen(fullscreenViewIdx, false)
+    }
+  })
 
   const searchTwitchChannels = createTwitchChannelSearch()
   ipcMain.handle('wall:search-twitch', async (event, query: unknown) => {

@@ -466,7 +466,7 @@ const viewStateMachine = setup({
     error: null,
     retryCount: 0,
     volume: 1,
-    fitMode: 'fit',
+    fitMode: 'fill',
     desiredAudio: 'muted',
     desiredBlurred: false,
     desiredPaused: false,

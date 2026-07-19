@@ -24,6 +24,7 @@ function renderControls({
   volume = 0.8,
   audioMode = 'muted' as const,
   fitMode = 'fit' as const,
+  isVisible = true,
   onControl = vi.fn<(command: WallControlCommand) => void>(),
 } = {}) {
   container = document.createElement('div')
@@ -37,6 +38,7 @@ function renderControls({
         volume={volume}
         audioMode={audioMode}
         fitMode={fitMode}
+        isVisible={isVisible}
         onControl={onControl}
       />,
       container!,

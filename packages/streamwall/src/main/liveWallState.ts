@@ -13,14 +13,18 @@ export interface LiveWallTileSettings {
 
 export interface LiveWallStoredState {
   tileCount: number
+  /** Versioned so older persisted `fit` defaults can migrate to edge-to-edge. */
+  fitModeVersion: number
   tiles: Record<string, LiveWallTileSettings>
 }
+
+export const LIVE_WALL_FIT_MODE_VERSION = 1
 
 export const DEFAULT_LIVE_WALL_TILE_SETTINGS: LiveWallTileSettings = {
   audioMode: 'muted',
   volume: 1,
   paused: false,
-  fitMode: 'fit',
+  fitMode: 'fill',
 }
 
 function normalizeVolume(value: unknown): number {
@@ -47,6 +51,8 @@ export function normalizeLiveWallState(
     typeof candidate.tiles === 'object' && candidate.tiles !== null
       ? candidate.tiles
       : {}
+  const hasCurrentFitModeDefaults =
+    candidate.fitModeVersion === LIVE_WALL_FIT_MODE_VERSION
   const tiles: Record<string, LiveWallTileSettings> = {}
 
   for (let idx = 0; idx < tileCount; idx++) {
@@ -56,11 +62,57 @@ export function normalizeLiveWallState(
       audioMode: value?.audioMode === 'unmuted' ? 'unmuted' : 'muted',
       volume: normalizeVolume(value?.volume),
       paused: value?.paused === true,
-      fitMode: value?.fitMode === 'fill' ? 'fill' : 'fit',
+      // Before fitModeVersion existed every slot was persisted as `fit`, even
+      // when the user had never chosen it. Migrate that old default once so a
+      // regular wall fills each cell; current-version explicit choices remain
+      // durable across restarts.
+      fitMode: hasCurrentFitModeDefaults
+        ? value?.fitMode === 'fit'
+          ? 'fit'
+          : 'fill'
+        : 'fill',
     }
   }
 
-  return { tileCount, tiles }
+  return {
+    tileCount,
+    fitModeVersion: LIVE_WALL_FIT_MODE_VERSION,
+    tiles,
+  }
+}
+
+/**
+ * Applies the geometrically sensible default after a structural layout change:
+ * one-cell streams fill their cell, while stretched streams fit their complete
+ * frame. A later user Fit/Fill command remains authoritative and persisted.
+ */
+export function applyDefaultFitModesForLayout(
+  state: LiveWallStoredState,
+  assignments: readonly (string | undefined)[],
+  onlyStreamId?: string,
+): void {
+  const spaceCountByStreamId = new Map<string, number>()
+  for (const streamId of assignments.slice(0, state.tileCount)) {
+    if (streamId) {
+      spaceCountByStreamId.set(
+        streamId,
+        (spaceCountByStreamId.get(streamId) ?? 0) + 1,
+      )
+    }
+  }
+
+  for (let idx = 0; idx < state.tileCount; idx++) {
+    const streamId = assignments[idx]
+    if (onlyStreamId !== undefined && streamId !== onlyStreamId) {
+      continue
+    }
+    updateLiveWallTileSettings(state, idx, {
+      fitMode:
+        streamId && (spaceCountByStreamId.get(streamId) ?? 0) > 1
+          ? 'fit'
+          : 'fill',
+    })
+  }
 }
 
 export function resizeLiveWallState(

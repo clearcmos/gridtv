@@ -20,6 +20,11 @@ const api = {
     ipcRenderer.on('wall:grid-menu-shortcut', internalHandler)
     return () => ipcRenderer.off('wall:grid-menu-shortcut', internalHandler)
   },
+  onFitModeShortcut: (handler: () => void) => {
+    const internalHandler = () => handler()
+    ipcRenderer.on('wall:fit-mode-shortcut', internalHandler)
+    return () => ipcRenderer.off('wall:fit-mode-shortcut', internalHandler)
+  },
   onFullscreenExitShortcut: (handler: () => void) => {
     const internalHandler = () => handler()
     ipcRenderer.on('wall:fullscreen-exit-shortcut', internalHandler)

@@ -8,7 +8,7 @@ import type {
   ViewState,
 } from 'streamwall-shared'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { Overlay } from './OverlayRoot'
+import { Overlay, WALL_CHROME_IDLE_MS } from './OverlayRoot'
 
 let container: HTMLDivElement | undefined
 
@@ -18,6 +18,7 @@ afterEach(() => {
     container.remove()
     container = undefined
   }
+  vi.useRealTimers()
 })
 
 function makeConfig(cols: number): StreamWindowConfig {
@@ -141,6 +142,11 @@ describe('self-contained wall controls', () => {
     expect(container.querySelector('[data-testid="grid-size-menu"]')).not.toBe(
       null,
     )
+    expect(container.textContent).toContain('Quick reference')
+    expect(container.textContent).toContain('Fit / Fill wall')
+    expect(container.textContent).toContain('Double-click')
+    expect(container.textContent).toContain('Left-drag')
+    expect(container.textContent).toContain('Right-drag')
 
     const twoTiles = container.querySelector('[aria-label="2 tiles"]')!
     act(() => {
@@ -151,6 +157,103 @@ describe('self-contained wall controls', () => {
       count: 2,
     })
     expect(container.querySelector('[data-testid="grid-size-menu"]')).toBe(null)
+  })
+
+  test('F2 cycles every active tile between Fill and Fit outside fullscreen', () => {
+    const onControl = vi.fn()
+    const fillViews = [makeView(0, 'view-0'), makeView(1, 'view-1')]
+    for (const view of fillViews) {
+      view.context.wallFitMode = 'fill'
+    }
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(2)}
+          views={fillViews}
+          streams={[makeStream('view-0'), makeStream('view-1')]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2' }))
+    })
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-fit-mode-all',
+      mode: 'fit',
+    })
+
+    const fitViews = [makeView(0, 'view-0'), makeView(1, 'view-1')]
+    for (const view of fitViews) {
+      view.context.wallFitMode = 'fit'
+    }
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(2)}
+          views={fitViews}
+          streams={[makeStream('view-0'), makeStream('view-1')]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2' }))
+    })
+    expect(onControl).toHaveBeenLastCalledWith({
+      type: 'set-wall-fit-mode-all',
+      mode: 'fill',
+    })
+
+    onControl.mockClear()
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(2)}
+          views={fitViews}
+          streams={[makeStream('view-0'), makeStream('view-1')]}
+          fullscreenViewIdx={0}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2' }))
+    })
+    expect(onControl).not.toHaveBeenCalled()
+  })
+
+  test('handles an F2 shortcut forwarded from a focused stream view', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[makeView(0, 'view-0')]}
+          streams={[makeStream('view-0')]}
+          fullscreenViewIdx={null}
+          fitModeShortcut={1}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'set-wall-fit-mode-all',
+      mode: 'fit',
+    })
   })
 
   test('renders a stream chooser for every slot, including empty ones', () => {
@@ -399,7 +502,10 @@ describe('self-contained wall controls', () => {
 
     act(() => dispatchPointer('pointerdown', 25, 25))
     act(() => dispatchPointer('pointermove', 350, 75))
-    expect(container.querySelector('[data-wall-resize-preview]')).not.toBeNull()
+    const preview = container.querySelector('[data-wall-resize-preview]')!
+    expect(preview).not.toBeNull()
+    expect(getComputedStyle(preview).borderLeftWidth).toBe('0px')
+    expect(getComputedStyle(preview).boxShadow).toBe('none')
     act(() => dispatchPointer('pointerup', 350, 75))
 
     expect(onControl).toHaveBeenCalledWith({
@@ -463,5 +569,71 @@ describe('self-contained wall controls', () => {
     const badge = root.querySelector('[data-wall-username]')
     expect(badge).not.toBeNull()
     expect(badge?.textContent).toBe('payo')
+  })
+
+  test('never exposes native cursor tooltips on wall tiles or controls', () => {
+    const root = renderOverlay([makeView(0, 'view-0')], [makeStream('view-0')])
+
+    expect(root.querySelectorAll('[title]')).toHaveLength(0)
+  })
+
+  test('auto-hides all tile chrome after pointer activity becomes idle', () => {
+    vi.useFakeTimers()
+    const root = renderOverlay([makeView(0, 'view-0')], [makeStream('view-0')])
+    const tile = root.querySelector('[data-wall-tile]')!
+    const controls = root.querySelector('[data-wall-media-controls]')!
+    const username = root.querySelector('[data-wall-username]')!
+    const picker = root.querySelector('[data-wall-tile-picker]')!
+
+    expect(tile.getAttribute('data-wall-chrome-visible')).toBe('false')
+
+    act(() => {
+      tile.dispatchEvent(
+        new PointerEvent('pointermove', { pointerId: 9, bubbles: true }),
+      )
+    })
+    expect(tile.getAttribute('data-wall-chrome-visible')).toBe('true')
+    expect(getComputedStyle(controls).opacity).toBe('1')
+    expect(getComputedStyle(username).opacity).toBe('1')
+    expect(getComputedStyle(picker).opacity).toBe('1')
+
+    act(() => vi.advanceTimersByTime(WALL_CHROME_IDLE_MS - 500))
+    act(() => {
+      tile.dispatchEvent(
+        new PointerEvent('pointermove', { pointerId: 9, bubbles: true }),
+      )
+    })
+    act(() => vi.advanceTimersByTime(500))
+    expect(tile.getAttribute('data-wall-chrome-visible')).toBe('true')
+
+    act(() => vi.advanceTimersByTime(WALL_CHROME_IDLE_MS - 500))
+    expect(tile.getAttribute('data-wall-chrome-visible')).toBe('false')
+    expect(getComputedStyle(controls).opacity).toBe('0')
+    expect(getComputedStyle(username).opacity).toBe('0')
+    expect(getComputedStyle(picker).opacity).toBe('0')
+  })
+
+  test('uses edge-to-edge tile hit areas without borders or audible glows', () => {
+    const view = makeView(0, 'view-0')
+    view.context.wallAudioMode = 'unmuted'
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[view]}
+          streams={[makeStream('view-0')]}
+          fullscreenViewIdx={0}
+          onControl={() => {}}
+        />,
+        container!,
+      )
+    })
+
+    const style = getComputedStyle(container.querySelector('[data-wall-tile]')!)
+    expect(style.borderLeftWidth).toBe('0px')
+    expect(style.borderRightWidth).toBe('0px')
+    expect(style.boxShadow).toBe('none')
   })
 })

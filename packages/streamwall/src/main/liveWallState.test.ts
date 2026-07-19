@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyDefaultFitModesForLayout,
+  LIVE_WALL_FIT_MODE_VERSION,
   normalizeLiveWallState,
   remapLiveWallTileSettings,
   resizeLiveWallState,
@@ -11,11 +13,12 @@ describe('live wall stored state', () => {
   it('creates defaults for an older database with no live-wall state', () => {
     expect(normalizeLiveWallState(undefined, 4)).toEqual({
       tileCount: 4,
+      fitModeVersion: LIVE_WALL_FIT_MODE_VERSION,
       tiles: {
-        '0': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
-        '1': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
-        '2': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
-        '3': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
+        '0': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fill' },
+        '1': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fill' },
+        '2': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fill' },
+        '3': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fill' },
       },
     })
   })
@@ -40,6 +43,7 @@ describe('live wall stored state', () => {
       ),
     ).toEqual({
       tileCount: 2,
+      fitModeVersion: LIVE_WALL_FIT_MODE_VERSION,
       tiles: {
         '0': {
           audioMode: 'unmuted',
@@ -47,9 +51,26 @@ describe('live wall stored state', () => {
           paused: true,
           fitMode: 'fill',
         },
-        '1': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fit' },
+        '1': { audioMode: 'muted', volume: 1, paused: false, fitMode: 'fill' },
       },
     })
+  })
+
+  it('preserves explicit Fit and Fill choices after the defaults migration', () => {
+    const state = normalizeLiveWallState(
+      {
+        tileCount: 2,
+        fitModeVersion: LIVE_WALL_FIT_MODE_VERSION,
+        tiles: {
+          '0': { fitMode: 'fit' },
+          '1': { fitMode: 'fill' },
+        },
+      },
+      9,
+    )
+
+    expect(state.tiles['0'].fitMode).toBe('fit')
+    expect(state.tiles['1'].fitMode).toBe('fill')
   })
 
   it('preserves surviving settings while resizing and defaults new slots', () => {
@@ -63,13 +84,13 @@ describe('live wall stored state', () => {
       audioMode: 'unmuted',
       volume: 0.4,
       paused: false,
-      fitMode: 'fit',
+      fitMode: 'fill',
     })
     expect(state.tiles['3']).toEqual({
       audioMode: 'muted',
       volume: 1,
       paused: false,
-      fitMode: 'fit',
+      fitMode: 'fill',
     })
 
     resizeLiveWallState(state, 1)
@@ -83,7 +104,7 @@ describe('live wall stored state', () => {
       audioMode: 'unmuted',
       volume: 0.35,
       paused: true,
-      fitMode: 'fill',
+      fitMode: 'fit',
     })
 
     swapLiveWallTileSettings(state, 0, 1)
@@ -92,13 +113,13 @@ describe('live wall stored state', () => {
       audioMode: 'muted',
       volume: 1,
       paused: false,
-      fitMode: 'fit',
+      fitMode: 'fill',
     })
     expect(state.tiles['1']).toEqual({
       audioMode: 'unmuted',
       volume: 0.35,
       paused: true,
-      fitMode: 'fill',
+      fitMode: 'fit',
     })
   })
 
@@ -129,7 +150,25 @@ describe('live wall stored state', () => {
       audioMode: 'muted',
       volume: 0.6,
       paused: false,
-      fitMode: 'fit',
+      fitMode: 'fill',
     })
+  })
+
+  it('fills ordinary cells and fits a stream stretched over several cells', () => {
+    const state = normalizeLiveWallState(undefined, 4)
+    updateLiveWallTileSettings(state, 1, { fitMode: 'fit' })
+
+    applyDefaultFitModesForLayout(state, ['a', 'a', 'b', undefined])
+
+    expect(state.tiles['0'].fitMode).toBe('fit')
+    expect(state.tiles['1'].fitMode).toBe('fit')
+    expect(state.tiles['2'].fitMode).toBe('fill')
+    expect(state.tiles['3'].fitMode).toBe('fill')
+
+    applyDefaultFitModesForLayout(state, ['a', 'b', undefined, undefined], 'a')
+
+    expect(state.tiles['0'].fitMode).toBe('fill')
+    // Filtering to one structurally changed stream leaves the other alone.
+    expect(state.tiles['1'].fitMode).toBe('fit')
   })
 })

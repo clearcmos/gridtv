@@ -451,17 +451,17 @@ describe('viewStateMachine volume control', () => {
     expect(sendViewVolume).toHaveBeenCalledTimes(1)
   })
 
-  it('defaults to uncropped fit and forwards an explicit fill choice', () => {
+  it('defaults to edge-to-edge fill and forwards an explicit fit choice', () => {
     const { actor, sendViewFitMode } = makeActorWithVolumeSpy(makeRetry())
     actor.start()
     display(actor)
 
-    expect(actor.getSnapshot().context.fitMode).toBe('fit')
-    actor.send({ type: 'SET_FIT_MODE', mode: 'fill' })
-
     expect(actor.getSnapshot().context.fitMode).toBe('fill')
+    actor.send({ type: 'SET_FIT_MODE', mode: 'fit' })
+
+    expect(actor.getSnapshot().context.fitMode).toBe('fit')
     expect(sendViewFitMode).toHaveBeenCalledWith(expect.anything(), {
-      mode: 'fill',
+      mode: 'fit',
     })
   })
 })

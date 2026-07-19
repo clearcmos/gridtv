@@ -42,7 +42,7 @@ const VIDEO_OVERRIDE_STYLE = `
     bottom: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
-    object-fit: var(--streamwall-object-fit, contain) !important;
+    object-fit: var(--streamwall-object-fit, cover) !important;
     transition: none !important;
     z-index: 999999 !important;
   }
@@ -341,7 +341,7 @@ async function main() {
   // acquisition, e.g. the 'emptied' handler below), so a PAUSE/RESUME
   // message received at any point can act on whichever one is current.
   let currentMedia: HTMLMediaElement | undefined
-  let latestFitMode: 'fit' | 'fill' = initialFitMode === 'fill' ? 'fill' : 'fit'
+  let latestFitMode: 'fit' | 'fill' = initialFitMode === 'fit' ? 'fit' : 'fill'
 
   function applyFitMode() {
     const objectFit = latestFitMode === 'fill' ? 'cover' : 'contain'

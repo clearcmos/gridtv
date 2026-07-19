@@ -320,12 +320,12 @@ describe('mediaPreload pause/resume handling (issue #374)', () => {
     expect(video.paused).toBe(false)
   })
 
-  it('fits the whole frame by default and switches to cropped fill on demand', async () => {
+  it('fills the tile by default and switches to whole-frame fit on demand', async () => {
     await loadAcquiredVideo()
 
     expect(insertCSS).toHaveBeenCalledWith(
       expect.stringContaining(
-        'object-fit: var(--streamwall-object-fit, contain)',
+        'object-fit: var(--streamwall-object-fit, cover)',
       ),
       { cssOrigin: 'user' },
     )
@@ -333,15 +333,15 @@ describe('mediaPreload pause/resume handling (issue #374)', () => {
       document.documentElement.style.getPropertyValue(
         '--streamwall-object-fit',
       ),
-    ).toBe('contain')
+    ).toBe('cover')
 
-    registeredHandler('fit-mode')({}, 'fill')
+    registeredHandler('fit-mode')({}, 'fit')
 
     expect(
       document.documentElement.style.getPropertyValue(
         '--streamwall-object-fit',
       ),
-    ).toBe('cover')
+    ).toBe('contain')
   })
 
   it('does not throw when a pause/resume message arrives before any media has been acquired', async () => {

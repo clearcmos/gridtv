@@ -98,6 +98,10 @@ export const wallControlCommandSchema = z.discriminatedUnion('type', [
     mode: wallFitModeSchema,
   }),
   z.object({
+    type: z.literal('set-wall-fit-mode-all'),
+    mode: wallFitModeSchema,
+  }),
+  z.object({
     type: z.literal('set-wall-tile-count'),
     count: liveTileCountSchema,
   }),

@@ -14,11 +14,20 @@ vi.mock('electron', () => ({
   WebContentsView: class {},
   WebContents: class {},
   ipcMain: { handle: () => {}, on: () => {} },
-  screen: { getAllDisplays: () => [] },
+  screen: {
+    getAllDisplays: () => [],
+    getDisplayMatching: () => ({
+      workArea: { x: 0, y: 0, width: 1707, height: 914 },
+    }),
+  },
   app: {},
 }))
 
-const { default: StreamWindow } = await import('./StreamWindow')
+const {
+  default: StreamWindow,
+  clampContentSizeToWorkArea,
+  showInitialStreamWindow,
+} = await import('./StreamWindow')
 
 function makeConfig(
   overrides: Partial<StreamWindowConfig> = {},
@@ -48,6 +57,8 @@ function makeStreamWindow(config: StreamWindowConfig) {
   sw.config = config
   sw.parkedViews = new Map()
   sw.pauseParkedViews = false
+  sw.resizeSyncTimers = []
+  sw.initialMaximizeTimers = []
   return sw
 }
 
@@ -89,6 +100,116 @@ describe('StreamWindow.setGridSize', () => {
 })
 
 describe('StreamWindow maximize/Wayland resize synchronization', () => {
+  it('maps every normal startup window before requesting maximization', () => {
+    const calls: string[] = []
+    const win = {
+      show: () => calls.push('show'),
+      maximize: () => calls.push('maximize'),
+    }
+
+    showInitialStreamWindow(win, false)
+
+    expect(calls).toEqual(['show', 'maximize'])
+  })
+
+  it('does not replace configured native fullscreen with maximization', () => {
+    const calls: string[] = []
+    const win = {
+      show: () => calls.push('show'),
+      maximize: () => calls.push('maximize'),
+    }
+
+    showInitialStreamWindow(win, true)
+
+    expect(calls).toEqual(['show'])
+  })
+
+  it('retries a maximize request that Wayland has not acknowledged', () => {
+    vi.useFakeTimers()
+    try {
+      const sw = makeStreamWindow(makeConfig())
+      const maximize = vi.fn()
+      sw.win = {
+        isDestroyed: () => false,
+        isFullScreen: () => false,
+        isMaximized: () => false,
+        maximize,
+        getSize: () => [1707, 988],
+        getContentSize: () => [1707, 960],
+      } as unknown as InstanceType<typeof StreamWindow>['win']
+
+      sw.scheduleInitialMaximizeSync()
+      vi.advanceTimersByTime(1500)
+
+      expect(maximize).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('limits stale maximized geometry to the visible KDE work area', () => {
+    expect(
+      clampContentSizeToWorkArea(
+        [1707, 932],
+        { x: 0, y: 28, width: 1707, height: 932 },
+        { x: 0, y: 0, width: 1707, height: 914 },
+      ),
+    ).toEqual([1707, 886])
+  })
+
+  it('retains Electron geometry when Wayland withholds usable coordinates', () => {
+    expect(
+      clampContentSizeToWorkArea(
+        [1707, 932],
+        { x: -10000, y: -10000, width: 1707, height: 932 },
+        { x: 0, y: 0, width: 1707, height: 914 },
+      ),
+    ).toEqual([1707, 932])
+  })
+
+  it('lays out a maximized wall above the reserved KDE panel', () => {
+    const sw = makeStreamWindow(makeConfig({ width: 1280, height: 720 }))
+    sw.win = {
+      isDestroyed: () => false,
+      isMaximized: () => true,
+      isFullScreen: () => false,
+      getContentSize: () => [1707, 932],
+      getContentBounds: () => ({
+        x: 0,
+        y: 28,
+        width: 1707,
+        height: 932,
+      }),
+    } as unknown as InstanceType<typeof StreamWindow>['win']
+    sw.backgroundView = {
+      setBounds: vi.fn(),
+    } as unknown as InstanceType<typeof StreamWindow>['backgroundView']
+    sw.overlayView = {
+      setBounds: vi.fn(),
+    } as unknown as InstanceType<typeof StreamWindow>['overlayView']
+    sw.offscreenWin = {
+      setContentSize: vi.fn(),
+    } as unknown as InstanceType<typeof StreamWindow>['offscreenWin']
+
+    sw.handleResize()
+
+    expect(sw.config.width).toBe(1707)
+    expect(sw.config.height).toBe(886)
+    expect(sw.backgroundView.setBounds).toHaveBeenCalledWith({
+      x: 0,
+      y: 0,
+      width: 1707,
+      height: 886,
+    })
+    expect(sw.overlayView.setBounds).toHaveBeenCalledWith({
+      x: 0,
+      y: 0,
+      width: 1707,
+      height: 886,
+    })
+    expect(sw.offscreenWin.setContentSize).toHaveBeenCalledWith(1707, 886)
+  })
+
   it('rechecks content size after a window-state event reports stale geometry', () => {
     vi.useFakeTimers()
     try {
@@ -99,6 +220,8 @@ describe('StreamWindow maximize/Wayland resize synchronization', () => {
         .mockReturnValue([200, 150])
       sw.win = {
         isDestroyed: () => false,
+        isMaximized: () => false,
+        isFullScreen: () => false,
         getContentSize,
       } as unknown as InstanceType<typeof StreamWindow>['win']
       sw.backgroundView = {
@@ -135,6 +258,79 @@ describe('StreamWindow maximize/Wayland resize synchronization', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('StreamWindow tile native fullscreen', () => {
+  function makeFullscreenHarness(initialFullscreen: boolean) {
+    const sw = makeStreamWindow(makeConfig())
+    let isFullscreen = initialFullscreen
+    const setFullScreen = vi.fn((enabled: boolean) => {
+      isFullscreen = enabled
+    })
+    sw.win = {
+      isDestroyed: () => false,
+      isFullScreen: () => isFullscreen,
+      setFullScreen,
+    } as unknown as InstanceType<typeof StreamWindow>['win']
+    return {
+      sw,
+      setFullScreen,
+      leaveExternally: () => {
+        isFullscreen = false
+        sw.handleNativeFullscreenExit()
+      },
+    }
+  }
+
+  it('enters true fullscreen once and restores a windowed wall on collapse', () => {
+    const { sw, setFullScreen } = makeFullscreenHarness(false)
+
+    sw.setTileNativeFullscreen(true)
+    sw.setTileNativeFullscreen(true)
+    sw.setTileNativeFullscreen(false)
+
+    expect(setFullScreen.mock.calls).toEqual([[true], [false]])
+    expect(sw.nativeFullscreenBeforeTile).toBeUndefined()
+  })
+
+  it('keeps a wall fullscreen when it was already fullscreen before expansion', () => {
+    const { sw, setFullScreen } = makeFullscreenHarness(true)
+
+    sw.setTileNativeFullscreen(true)
+    sw.setTileNativeFullscreen(false)
+
+    expect(setFullScreen).not.toHaveBeenCalled()
+  })
+
+  it('reports an external native-fullscreen exit exactly once', () => {
+    const { sw, setFullScreen, leaveExternally } = makeFullscreenHarness(false)
+    const emit = vi.spyOn(sw, 'emit')
+    sw.setTileNativeFullscreen(true)
+
+    leaveExternally()
+    sw.setTileNativeFullscreen(false)
+    sw.handleNativeFullscreenExit()
+
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith('tileFullscreenExited')
+    expect(setFullScreen.mock.calls).toEqual([[true]])
+  })
+
+  it('cancels a pending Wayland fullscreen entry when collapse happens first', () => {
+    const sw = makeStreamWindow(makeConfig())
+    const setFullScreen = vi.fn()
+    sw.win = {
+      isDestroyed: () => false,
+      // Wayland may not reflect setFullScreen(true) synchronously.
+      isFullScreen: () => false,
+      setFullScreen,
+    } as unknown as InstanceType<typeof StreamWindow>['win']
+
+    sw.setTileNativeFullscreen(true)
+    sw.setTileNativeFullscreen(false)
+
+    expect(setFullScreen.mock.calls).toEqual([[true], [false]])
   })
 })
 
@@ -322,6 +518,27 @@ describe('StreamWindow wall media controls', () => {
     expect(send).toHaveBeenCalledWith({ type: 'PAUSE' })
     expect(send).toHaveBeenCalledWith({ type: 'SET_VOLUME', volume: 0.4 })
     expect(send).toHaveBeenCalledWith({ type: 'SET_FIT_MODE', mode: 'fill' })
+  })
+
+  it('routes the wall-wide fit shortcut to every view actor', () => {
+    const sw = makeStreamWindow(makeConfig())
+    const first = makeWallControlActor({ id: 17 })
+    const second = makeWallControlActor({ id: 18 })
+    sw.views = new Map([
+      [17, first.actor],
+      [18, second.actor],
+    ])
+
+    sw.handleWallControl({ type: 'set-wall-fit-mode-all', mode: 'fit' })
+
+    expect(first.send).toHaveBeenCalledWith({
+      type: 'SET_FIT_MODE',
+      mode: 'fit',
+    })
+    expect(second.send).toHaveBeenCalledWith({
+      type: 'SET_FIT_MODE',
+      mode: 'fit',
+    })
   })
 
   it('ignores commands for a stale view id', () => {

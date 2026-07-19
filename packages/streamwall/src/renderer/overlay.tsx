@@ -20,6 +20,7 @@ initRendererSentry()
 function App() {
   const [state, setState] = useState<StreamwallState | undefined>()
   const [gridMenuShortcut, setGridMenuShortcut] = useState(0)
+  const [fitModeShortcut, setFitModeShortcut] = useState(0)
   const [fullscreenExitShortcut, setFullscreenExitShortcut] = useState(0)
 
   useEffect(() => {
@@ -32,6 +33,14 @@ function App() {
     () =>
       window.streamwallLayer.onGridMenuShortcut(() =>
         setGridMenuShortcut((value) => value + 1),
+      ),
+    [],
+  )
+
+  useEffect(
+    () =>
+      window.streamwallLayer.onFitModeShortcut(() =>
+        setFitModeShortcut((value) => value + 1),
       ),
     [],
   )
@@ -63,6 +72,7 @@ function App() {
       onControl={window.streamwallLayer.control}
       onSearchTwitch={window.streamwallLayer.searchTwitch}
       gridMenuShortcut={gridMenuShortcut}
+      fitModeShortcut={fitModeShortcut}
       fullscreenExitShortcut={fullscreenExitShortcut}
     />
   )

@@ -56,6 +56,7 @@ export function WallMediaControls({
   volume,
   audioMode,
   fitMode,
+  isVisible,
   onControl,
 }: {
   viewId: number
@@ -64,6 +65,7 @@ export function WallMediaControls({
   volume: number
   audioMode: WallAudioMode
   fitMode: WallFitMode
+  isVisible: boolean
   onControl: (command: WallControlCommand) => void
 }) {
   const handlePlaybackClick = useCallback(() => {
@@ -108,7 +110,6 @@ export function WallMediaControls({
   }, [fitMode, onControl, viewId, viewIdx])
 
   const modeLabel = AUDIO_MODE_LABEL[audioMode]
-  const nextModeLabel = AUDIO_MODE_LABEL[nextWallAudioMode(audioMode)]
 
   return (
     <ControlBar
@@ -116,12 +117,12 @@ export function WallMediaControls({
       data-no-tile-drag
       data-testid="wall-media-controls"
       draggable={false}
+      $isVisible={isVisible}
     >
       <ControlButton
         type="button"
         onClick={handlePlaybackClick}
         aria-label={isPaused ? 'Play stream' : 'Pause stream'}
-        title={isPaused ? 'Play stream' : 'Pause stream'}
         $isActive={isPaused}
       >
         {isPaused ? <FaPlay /> : <FaPause />}
@@ -137,7 +138,6 @@ export function WallMediaControls({
           value={volume}
           onInput={handleVolumeInput}
           aria-label="Stream volume"
-          title={`Volume ${Math.round(volume * 100)}%`}
         />
       </VolumeGroup>
 
@@ -145,11 +145,6 @@ export function WallMediaControls({
         type="button"
         onClick={handleFitModeClick}
         aria-label={`Video fit: ${fitMode === 'fit' ? 'Fit' : 'Fill'}`}
-        title={
-          fitMode === 'fit'
-            ? 'Fit: whole frame visible; click to fill and crop'
-            : 'Fill: edge-to-edge crop; click to fit the whole frame'
-        }
         $mode={fitMode}
       >
         {fitMode === 'fit' ? <FaCompressArrowsAlt /> : <FaExpandArrowsAlt />}
@@ -160,7 +155,6 @@ export function WallMediaControls({
         type="button"
         onClick={handleAudioModeClick}
         aria-label={`Audio mode: ${modeLabel}`}
-        title={`${modeLabel}: click for ${nextModeLabel}`}
         $mode={audioMode}
       >
         <AudioModeIcon mode={audioMode} />
@@ -170,7 +164,7 @@ export function WallMediaControls({
   )
 }
 
-const ControlBar = styled.div`
+const ControlBar = styled.div<{ $isVisible: boolean }>`
   position: absolute;
   left: 50%;
   bottom: clamp(5px, 4cqh, 18px);
@@ -187,18 +181,12 @@ const ControlBar = styled.div`
   border-radius: clamp(7px, 3cqh, 14px);
   box-shadow: 0 5px 22px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(14px);
-  transform: translate(-50%, 5px);
-  opacity: 0;
-  pointer-events: none;
+  transform: translate(-50%, ${({ $isVisible }) => ($isVisible ? 0 : 5)}px);
+  opacity: ${({ $isVisible }) => ($isVisible ? 1 : 0)};
+  pointer-events: ${({ $isVisible }) => ($isVisible ? 'auto' : 'none')};
   transition:
     opacity 120ms ease-out,
     transform 120ms ease-out;
-
-  @media (hover: none) {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translate(-50%, 0);
-  }
 `
 
 const ControlButton = styled.button<{ $isActive?: boolean }>`

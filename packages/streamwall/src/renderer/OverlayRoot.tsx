@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { FaEdit, FaPlus, FaVideoSlash } from 'react-icons/fa'
 import {
   computeLiveTileLayout,
@@ -11,6 +11,7 @@ import {
   type ViewPos,
   type ViewState,
   type WallControlCommand,
+  type WallFitMode,
 } from 'streamwall-shared'
 import { styled } from 'styled-components'
 import { matchesState } from 'xstate'
@@ -20,6 +21,23 @@ import { LAYER_FRAME_SANDBOX } from './layerFrameSandbox'
 import { OverlayViewTile } from './OverlayViewTile'
 import { StreamPickerDialog } from './StreamPickerDialog'
 import { WallMediaControls } from './WallMediaControls'
+
+/** Matches familiar video-player UX without making controls feel twitchy. */
+export const WALL_CHROME_IDLE_MS = 2500
+
+/** A mixed wall normalizes to Fill first; a uniformly filled wall cycles to Fit. */
+export function nextWallFitModeForViews(
+  views: readonly ViewState[],
+): WallFitMode {
+  const activeViews = views.filter(({ state }) =>
+    matchesState('displaying', state),
+  )
+  return activeViews.every(
+    ({ context }) => (context.wallFitMode ?? 'fill') === 'fill',
+  )
+    ? 'fit'
+    : 'fill'
+}
 
 // Extracted from overlay.tsx so it can be rendered and tested in isolation,
 // without pulling in the module-level `render(<App />, document.body)` call.
@@ -32,6 +50,7 @@ export function Overlay({
   onControl,
   onSearchTwitch = async () => [],
   gridMenuShortcut = 0,
+  fitModeShortcut = 0,
   fullscreenExitShortcut = 0,
 }: Pick<
   StreamwallState,
@@ -40,9 +59,10 @@ export function Overlay({
   onControl: (command: WallControlCommand) => void
   onSearchTwitch?: (query: string) => Promise<TwitchChannelSuggestion[]>
   gridMenuShortcut?: number
+  fitModeShortcut?: number
   fullscreenExitShortcut?: number
 }) {
-  const { width, height, activeColor } = config
+  const { width, height } = config
   const tileCount = config.tileCount ?? config.cols * config.rows
   const baseLayout = computeLiveTileLayout(tileCount, width, height)
   const [isGridMenuOpen, setGridMenuOpen] = useState(false)
@@ -50,14 +70,17 @@ export function Overlay({
   const [dragSourceViewIdx, setDragSourceViewIdx] = useState<number | null>(
     null,
   )
-  const [dropTargetViewIdx, setDropTargetViewIdx] = useState<number | null>(
-    null,
-  )
   const [resizeSourceViewIdx, setResizeSourceViewIdx] = useState<number | null>(
     null,
   )
   const [resizeTargetViewIdx, setResizeTargetViewIdx] = useState<number | null>(
     null,
+  )
+  const [visibleChromeViewIdx, setVisibleChromeViewIdx] = useState<
+    number | null
+  >(null)
+  const chromeIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
   )
   const tileGesture = useRef<{
     kind: 'swap' | 'resize'
@@ -69,6 +92,40 @@ export function Overlay({
     targetViewIdx: number | null
   } | null>(null)
   const suppressDoubleClickUntil = useRef(0)
+  const lastFitModeShortcut = useRef(0)
+
+  const cycleWallFitMode = useCallback(() => {
+    if (fullscreenViewIdx != null) {
+      return
+    }
+    onControl({
+      type: 'set-wall-fit-mode-all',
+      mode: nextWallFitModeForViews(views),
+    })
+  }, [fullscreenViewIdx, onControl, views])
+
+  const clearChromeIdleTimer = () => {
+    clearTimeout(chromeIdleTimer.current)
+    chromeIdleTimer.current = undefined
+  }
+
+  const showTileChrome = (viewIdx: number) => {
+    clearChromeIdleTimer()
+    setVisibleChromeViewIdx(viewIdx)
+    chromeIdleTimer.current = setTimeout(() => {
+      setVisibleChromeViewIdx((current) =>
+        current === viewIdx ? null : current,
+      )
+      chromeIdleTimer.current = undefined
+    }, WALL_CHROME_IDLE_MS)
+  }
+
+  const hideTileChrome = (viewIdx: number) => {
+    clearChromeIdleTimer()
+    setVisibleChromeViewIdx((current) => (current === viewIdx ? null : current))
+  }
+
+  useEffect(() => () => clearChromeIdleTimer(), [])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -76,6 +133,9 @@ export function Overlay({
         event.preventDefault()
         setPickerViewIdx(null)
         setGridMenuOpen((open) => !open)
+      } else if (event.key === 'F2' && fullscreenViewIdx == null) {
+        event.preventDefault()
+        cycleWallFitMode()
       } else if (event.key === 'Escape') {
         if (isGridMenuOpen) {
           event.preventDefault()
@@ -92,7 +152,13 @@ export function Overlay({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [fullscreenViewIdx, isGridMenuOpen, onControl, pickerViewIdx])
+  }, [
+    cycleWallFitMode,
+    fullscreenViewIdx,
+    isGridMenuOpen,
+    onControl,
+    pickerViewIdx,
+  ])
 
   useEffect(() => {
     if (gridMenuShortcut > 0) {
@@ -100,6 +166,13 @@ export function Overlay({
       setGridMenuOpen((open) => !open)
     }
   }, [gridMenuShortcut])
+
+  useEffect(() => {
+    if (fitModeShortcut > lastFitModeShortcut.current) {
+      lastFitModeShortcut.current = fitModeShortcut
+      cycleWallFitMode()
+    }
+  }, [cycleWallFitMode, fitModeShortcut])
 
   useEffect(() => {
     if (fullscreenExitShortcut > 0 && fullscreenViewIdx != null) {
@@ -140,7 +213,6 @@ export function Overlay({
   const clearTileGesture = () => {
     tileGesture.current = null
     setDragSourceViewIdx(null)
-    setDropTargetViewIdx(null)
     setResizeSourceViewIdx(null)
     setResizeTargetViewIdx(null)
   }
@@ -164,7 +236,6 @@ export function Overlay({
       : assignedData
     const isError = view ? matchesState('displaying.error', state) : false
     const wallAudioMode = context?.wallAudioMode ?? 'muted'
-    const isAudible = wallAudioMode === 'unmuted'
     const isBlurred = view
       ? matchesState('displaying.running.video.blurred', state)
       : false
@@ -220,24 +291,16 @@ export function Overlay({
     }
 
     return (
-      <SpaceBorder
+      <TileInteractionLayer
         key={viewIdx}
         data-wall-tile
         data-view-idx={viewIdx}
-        $pos={pos}
-        $windowWidth={width}
-        $windowHeight={height}
-        $activeColor={activeColor}
-        $isListening={isAudible}
-        $isError={isError}
-        $isDragging={dragSourceViewIdx === viewIdx}
-        $isDropTarget={dropTargetViewIdx === viewIdx}
-        $isResizing={resizeSourceViewIdx === viewIdx}
-        title={
-          view
-            ? 'Double-click to expand; left-drag to swap; right-drag to resize'
-            : 'Left-drag to swap'
+        data-wall-chrome-visible={
+          visibleChromeViewIdx === viewIdx ? 'true' : 'false'
         }
+        $pos={pos}
+        $isDragging={dragSourceViewIdx === viewIdx}
+        $isResizing={resizeSourceViewIdx === viewIdx}
         onDblClick={(event) => {
           if (
             Date.now() < suppressDoubleClickUntil.current ||
@@ -254,6 +317,7 @@ export function Overlay({
           })
         }}
         onPointerDown={(event) => {
+          showTileChrome(viewIdx)
           if (
             fullscreenViewIdx != null ||
             interactiveTarget(event.target) ||
@@ -279,6 +343,7 @@ export function Overlay({
           )
         }}
         onPointerMove={(event) => {
+          showTileChrome(viewIdx)
           const gesture = tileGesture.current
           if (!gesture || gesture.pointerId !== event.pointerId) {
             return
@@ -297,7 +362,6 @@ export function Overlay({
           gesture.targetViewIdx = targetViewIdx ?? null
           if (gesture.kind === 'swap') {
             setDragSourceViewIdx(gesture.sourceViewIdx)
-            setDropTargetViewIdx(targetViewIdx ?? null)
           } else {
             setResizeSourceViewIdx(gesture.sourceViewIdx)
             setResizeTargetViewIdx(targetViewIdx ?? null)
@@ -306,6 +370,9 @@ export function Overlay({
             event.preventDefault()
           }
         }}
+        onPointerEnter={() => showTileChrome(viewIdx)}
+        onPointerLeave={() => hideTileChrome(viewIdx)}
+        onFocusCapture={() => showTileChrome(viewIdx)}
         onPointerUp={handlePointerFinish}
         onPointerCancel={clearTileGesture}
         onContextMenu={(event) => event.preventDefault()}
@@ -348,7 +415,12 @@ export function Overlay({
           </EmptyTile>
         )}
         {hasAssignment && (
-          <UsernameBadge data-wall-username>{username}</UsernameBadge>
+          <UsernameBadge
+            data-wall-username
+            $isVisible={visibleChromeViewIdx === viewIdx}
+          >
+            {username}
+          </UsernameBadge>
         )}
         {view && context && (
           <WallMediaControls
@@ -357,7 +429,8 @@ export function Overlay({
             isPaused={context.isPaused ?? false}
             volume={context.volume}
             audioMode={wallAudioMode}
-            fitMode={context.wallFitMode ?? 'fit'}
+            fitMode={context.wallFitMode ?? 'fill'}
+            isVisible={visibleChromeViewIdx === viewIdx}
             onControl={onControl}
           />
         )}
@@ -365,8 +438,8 @@ export function Overlay({
           data-wall-tile-picker
           type="button"
           aria-label={`Choose stream for tile ${viewIdx + 1}`}
-          title={`Choose stream for tile ${viewIdx + 1}`}
           $empty={!hasAssignment}
+          $isVisible={visibleChromeViewIdx === viewIdx}
           data-no-tile-drag
           draggable={false}
           onClick={() => {
@@ -376,7 +449,7 @@ export function Overlay({
         >
           {hasAssignment ? <FaEdit /> : <FaPlus />}
         </TilePickerButton>
-      </SpaceBorder>
+      </TileInteractionLayer>
     )
   }
 
@@ -540,20 +613,11 @@ const OverlayContainer = styled.div`
   pointer-events: none;
 `
 
-const SpaceBorder = styled.div.attrs<{
+const TileInteractionLayer = styled.div<{
   $pos: ViewPos
-  $windowWidth: number
-  $windowHeight: number
-  $activeColor: string
-  $isListening: boolean
-  $isError?: boolean
   $isDragging: boolean
-  $isDropTarget: boolean
   $isResizing: boolean
-  $borderWidth?: number
-}>(() => ({
-  $borderWidth: 2,
-}))`
+}>`
   display: flex;
   align-items: flex-start;
   position: fixed;
@@ -561,22 +625,9 @@ const SpaceBorder = styled.div.attrs<{
   top: ${({ $pos }) => $pos.y}px;
   width: ${({ $pos }) => $pos.width}px;
   height: ${({ $pos }) => $pos.height}px;
-  border: 0 solid ${({ $isError }) => ($isError ? 'red' : 'black')};
-  border-left-width: ${({ $pos, $borderWidth }) =>
-    $pos.x === 0 ? 0 : $borderWidth}px;
-  border-right-width: ${({ $pos, $borderWidth, $windowWidth }) =>
-    $pos.x + $pos.width === $windowWidth ? 0 : $borderWidth}px;
-  border-top-width: ${({ $pos, $borderWidth }) =>
-    $pos.y === 0 ? 0 : $borderWidth}px;
-  border-bottom-width: ${({ $pos, $borderWidth, $windowHeight }) =>
-    $pos.y + $pos.height === $windowHeight ? 0 : $borderWidth}px;
-  box-shadow: ${({ $isListening, $activeColor, $isDropTarget }) =>
-    [
-      $isListening ? `0 0 10px ${$activeColor} inset` : '',
-      $isDropTarget ? '0 0 0 5px rgba(167, 139, 250, 0.95) inset' : '',
-    ]
-      .filter(Boolean)
-      .join(', ') || 'none'};
+  border: 0;
+  outline: 0;
+  box-shadow: none;
   box-sizing: border-box;
   container-type: size;
   pointer-events: auto;
@@ -585,27 +636,10 @@ const SpaceBorder = styled.div.attrs<{
   cursor: ${({ $isDragging, $isResizing }) =>
     $isResizing ? 'nwse-resize' : $isDragging ? 'grabbing' : 'grab'};
   opacity: ${({ $isDragging }) => ($isDragging ? 0.62 : 1)};
-  transition:
-    box-shadow 100ms ease-out,
-    opacity 100ms ease-out;
-
-  &:hover [data-wall-media-controls] {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translate(-50%, 0);
-  }
-
-  &:hover [data-wall-tile-picker] {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  &:hover [data-wall-username] {
-    opacity: 1;
-  }
+  transition: opacity 100ms ease-out;
 `
 
-const UsernameBadge = styled.div`
+const UsernameBadge = styled.div<{ $isVisible: boolean }>`
   position: absolute;
   top: clamp(5px, 3cqh, 12px);
   left: 50%;
@@ -625,7 +659,7 @@ const UsernameBadge = styled.div`
   border-radius: clamp(5px, 2cqh, 9px);
   box-shadow: 0 3px 14px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(12px);
-  opacity: 0;
+  opacity: ${({ $isVisible }) => ($isVisible ? 1 : 0)};
   pointer-events: none;
   transform: translateX(-50%);
   transition: opacity 120ms ease-out;
@@ -639,9 +673,10 @@ const ResizePreview = styled.div<{ $pos: ViewPos }>`
   width: ${({ $pos }) => $pos.width}px;
   height: ${({ $pos }) => $pos.height}px;
   box-sizing: border-box;
-  background: rgba(139, 92, 246, 0.12);
-  border: 4px solid rgba(196, 181, 253, 0.96);
-  box-shadow: 0 0 22px rgba(139, 92, 246, 0.65) inset;
+  background: rgba(139, 92, 246, 0.16);
+  border: 0;
+  outline: 0;
+  box-shadow: none;
   pointer-events: none;
 `
 
@@ -694,7 +729,10 @@ const UnavailableTile = styled.div`
   }
 `
 
-const TilePickerButton = styled.button<{ $empty: boolean }>`
+const TilePickerButton = styled.button<{
+  $empty: boolean
+  $isVisible: boolean
+}>`
   position: absolute;
   top: clamp(5px, 3cqh, 12px);
   right: clamp(5px, 3cqh, 12px);
@@ -710,14 +748,14 @@ const TilePickerButton = styled.button<{ $empty: boolean }>`
   border-radius: clamp(5px, 2cqh, 9px);
   box-shadow: 0 3px 14px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(12px);
-  opacity: ${({ $empty }) => ($empty ? 0.68 : 0)};
-  pointer-events: ${({ $empty }) => ($empty ? 'auto' : 'none')};
+  opacity: ${({ $empty, $isVisible }) =>
+    $isVisible ? ($empty ? 0.68 : 1) : 0};
+  pointer-events: ${({ $isVisible }) => ($isVisible ? 'auto' : 'none')};
   cursor: pointer;
   transition: opacity 120ms ease-out;
 
   &:hover,
   &:focus-visible {
-    opacity: 1;
     background: rgba(145, 71, 255, 0.9);
     outline: 2px solid white;
     outline-offset: 1px;
