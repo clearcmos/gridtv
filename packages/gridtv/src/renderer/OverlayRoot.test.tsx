@@ -419,6 +419,59 @@ describe('self-contained wall controls', () => {
     })
   })
 
+  test('a forwarded Escape exits fullscreen once without reverting later entries', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    const props = {
+      config: makeConfig(1),
+      views: [makeView(0, 'view-0')],
+      streams: [makeStream('view-0')],
+      onControl,
+    }
+    act(() =>
+      render(
+        <Overlay {...props} fullscreenViewIdx={0} fullscreenExitShortcut={0} />,
+        container!,
+      ),
+    )
+
+    // Escape pressed while a stream view held keyboard focus arrives as a
+    // counter increment forwarded from the main process.
+    act(() =>
+      render(
+        <Overlay {...props} fullscreenViewIdx={0} fullscreenExitShortcut={1} />,
+        container!,
+      ),
+    )
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'set-wall-fullscreen',
+      viewIdx: 0,
+      fullscreen: false,
+    })
+    expect(onControl).toHaveBeenCalledTimes(1)
+
+    // The wall restores, then the user enters fullscreen again. The stale
+    // counter must not fire a second exit and instantly revert the entry.
+    act(() =>
+      render(
+        <Overlay
+          {...props}
+          fullscreenViewIdx={null}
+          fullscreenExitShortcut={1}
+        />,
+        container!,
+      ),
+    )
+    act(() =>
+      render(
+        <Overlay {...props} fullscreenViewIdx={0} fullscreenExitShortcut={1} />,
+        container!,
+      ),
+    )
+    expect(onControl).toHaveBeenCalledTimes(1)
+  })
+
   test('F toggles fullscreen for the hovered stream', () => {
     const onControl = vi.fn()
     container = document.createElement('div')

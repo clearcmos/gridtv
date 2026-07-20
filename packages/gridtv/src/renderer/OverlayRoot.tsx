@@ -110,6 +110,7 @@ export function Overlay({
   } | null>(null)
   const suppressDoubleClickUntil = useRef(0)
   const lastFitModeShortcut = useRef(0)
+  const lastFullscreenExitShortcut = useRef(0)
   const lastTileKeyShortcut = useRef(0)
   const recentTileKeyExecution = useRef<{
     key: string
@@ -283,12 +284,18 @@ export function Overlay({
   }, [cycleWallFitMode, fitModeShortcut])
 
   useEffect(() => {
-    if (fullscreenExitShortcut > 0 && fullscreenViewIdx != null) {
-      onControl({
-        type: 'set-wall-fullscreen',
-        viewIdx: fullscreenViewIdx,
-        fullscreen: false,
-      })
+    // Consume each forwarded Escape exactly once. Without the sequence guard,
+    // a stale counter re-triggers this effect whenever fullscreenViewIdx
+    // changes, instantly reverting every later fullscreen entry.
+    if (fullscreenExitShortcut > lastFullscreenExitShortcut.current) {
+      lastFullscreenExitShortcut.current = fullscreenExitShortcut
+      if (fullscreenViewIdx != null) {
+        onControl({
+          type: 'set-wall-fullscreen',
+          viewIdx: fullscreenViewIdx,
+          fullscreen: false,
+        })
+      }
     }
   }, [fullscreenExitShortcut, fullscreenViewIdx, onControl])
 
