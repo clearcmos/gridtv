@@ -26,6 +26,7 @@ vi.mock('electron', () => ({
 const {
   default: StreamWindow,
   clampContentSizeToWorkArea,
+  selectMaximizedWorkArea,
   showInitialStreamWindow,
 } = await import('./StreamWindow')
 
@@ -170,6 +171,57 @@ describe('StreamWindow maximize/Wayland resize synchronization', () => {
         { x: 0, y: 0, width: 1707, height: 914 },
       ),
     ).toEqual([1707, 932])
+  })
+
+  it('does not shrink width when Wayland reports the window left of its monitor', () => {
+    // Regression: a portrait monitor at the origin left of a landscape monitor.
+    // Wayland reports the maximized window's global x as 0 even though it lives
+    // on the landscape monitor, so the clamp must not treat the negative offset
+    // to the landscape work area (x:960) as a reserved-panel inset.
+    expect(
+      clampContentSizeToWorkArea(
+        [1707, 858],
+        { x: 0, y: 28, width: 1707, height: 858 },
+        { x: 960, y: 115, width: 1707, height: 858 },
+      ),
+    ).toEqual([1707, 858])
+  })
+
+  it('selects the wide monitor a maximized wall occupies, not a narrower one', () => {
+    // A portrait 960px-wide panel at the origin plus the 1707px landscape
+    // monitor the wall is really maximized on. Position is unreliable, so the
+    // 1707px content width must resolve to the landscape work area.
+    const portrait = { workArea: { x: 0, y: 0, width: 960, height: 1707 } }
+    const landscape = { workArea: { x: 960, y: 115, width: 1707, height: 858 } }
+    expect(
+      selectMaximizedWorkArea([1707, 858], [portrait, landscape], {
+        x: 0,
+        y: 0,
+        width: 960,
+        height: 1707,
+      }),
+    ).toEqual(landscape.workArea)
+  })
+
+  it('keeps a maximized wall full-width on a landscape monitor beside a portrait one', () => {
+    // End-to-end: the display selection plus the clamp must leave the full
+    // 1707px landscape width intact rather than collapsing it to 960px.
+    const portrait = { workArea: { x: 0, y: 0, width: 960, height: 1707 } }
+    const landscape = { workArea: { x: 960, y: 115, width: 1707, height: 858 } }
+    const contentBounds = { x: 0, y: 28, width: 1707, height: 858 }
+    const workArea = selectMaximizedWorkArea(
+      [1707, 858],
+      [portrait, landscape],
+      portrait.workArea,
+    )
+    expect(
+      clampContentSizeToWorkArea([1707, 858], contentBounds, workArea),
+    ).toEqual([1707, 858])
+  })
+
+  it('falls back to the position-matched work area when no monitor is wide enough', () => {
+    const fallback = { x: 0, y: 0, width: 1707, height: 914 }
+    expect(selectMaximizedWorkArea([1707, 932], [], fallback)).toBe(fallback)
   })
 
   it('lays out a maximized wall above the reserved KDE panel', () => {

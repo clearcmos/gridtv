@@ -62,6 +62,52 @@ function getDisplayOptions(stream: StreamData): ContentDisplayOptions {
 }
 
 /**
+ * Picks the work area a maximized wall should be laid out within.
+ *
+ * The obvious `screen.getDisplayMatching(contentBounds)` resolves the monitor
+ * from the window's global position, but KDE/Wayland routinely reports a
+ * maximized window's position as the left origin (x:0) regardless of which
+ * monitor it actually occupies. When a narrower or rotated display sits at that
+ * origin (e.g. a portrait panel left of a landscape monitor), the mismatched
+ * position makes getDisplayMatching pick the wrong, smaller monitor, whose work
+ * area then shrinks the wall (a 1707px-wide landscape wall clamped down to a
+ * 960px portrait monitor's width).
+ *
+ * A maximized window's content *width* equals its own monitor's work-area
+ * width, and that width reliably distinguishes monitors even when the reported
+ * position does not. So match on it: choose the narrowest work area that still
+ * fits the content width (tie-broken by the closest height). A monitor
+ * narrower than the wall can never be chosen, so it can no longer shrink it.
+ * When no monitor is wide enough (an empty display list under test, or a
+ * transient over-report), fall back to the position-matched work area, which is
+ * always correct on a single-monitor setup.
+ */
+export function selectMaximizedWorkArea(
+  contentSize: readonly [number, number],
+  displays: ReadonlyArray<{ workArea: Rectangle }>,
+  fallbackWorkArea: Rectangle,
+): Rectangle {
+  const [width, height] = contentSize
+  let best: Rectangle | undefined
+  let bestScore = Infinity
+  for (const { workArea } of displays) {
+    if (workArea.width < width) {
+      continue
+    }
+    // Weight the horizontal fit far above the vertical one so the monitor whose
+    // width matches the wall always wins; height only breaks ties between
+    // equally wide monitors.
+    const score =
+      (workArea.width - width) * 100_000 + Math.abs(workArea.height - height)
+    if (score < bestScore) {
+      bestScore = score
+      best = workArea
+    }
+  }
+  return best ?? fallbackWorkArea
+}
+
+/**
  * KDE/Wayland can briefly report a maximized content rectangle extending
  * beneath a reserved panel. Clamp it to the display work area so the grid is
  * laid out only inside pixels the operator can actually see.
@@ -71,28 +117,28 @@ export function clampContentSizeToWorkArea(
   contentBounds: Rectangle,
   workArea: Rectangle,
 ): [number, number] {
-  const left = Math.max(contentBounds.x, workArea.x)
-  const top = Math.max(contentBounds.y, workArea.y)
-  const right = Math.min(
-    contentBounds.x + contentBounds.width,
-    workArea.x + workArea.width,
-  )
-  const bottom = Math.min(
-    contentBounds.y + contentBounds.height,
-    workArea.y + workArea.height,
-  )
-  const visibleWidth = right - left
-  const visibleHeight = bottom - top
-  if (visibleWidth <= 0 || visibleHeight <= 0) {
-    // Some Wayland compositors intentionally withhold global window
-    // coordinates. In that case the intersection is meaningless, so retain
-    // Electron's reported content size and let the delayed probes converge.
-    return [contentSize[0], contentSize[1]]
+  const [width, height] = contentSize
+  // If the reported window rectangle does not intersect the work area at all,
+  // the compositor is withholding usable global coordinates. The clamp would be
+  // meaningless, so keep Electron's size and let the delayed probes converge.
+  const overlapsX =
+    contentBounds.x < workArea.x + workArea.width &&
+    contentBounds.x + width > workArea.x
+  const overlapsY =
+    contentBounds.y < workArea.y + workArea.height &&
+    contentBounds.y + height > workArea.y
+  if (!overlapsX || !overlapsY) {
+    return [width, height]
   }
-  return [
-    Math.min(contentSize[0], visibleWidth),
-    Math.min(contentSize[1], visibleHeight),
-  ]
+  // Subtract only a *positive* offset of the content past the work-area origin,
+  // i.e. a reserved panel pushing the content down or right. A negative offset
+  // means the reported position sits left of / above the work area, which on
+  // multi-monitor Wayland just reflects the unreliable global position of a
+  // window that is really on another monitor; it must not shrink the axis.
+  const usableWidth = workArea.width - Math.max(0, contentBounds.x - workArea.x)
+  const usableHeight =
+    workArea.height - Math.max(0, contentBounds.y - workArea.y)
+  return [Math.min(width, usableWidth), Math.min(height, usableHeight)]
 }
 
 /**
@@ -542,7 +588,11 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     let [width, height] = this.win.getContentSize()
     if (this.win.isMaximized() && !this.win.isFullScreen()) {
       const contentBounds = this.win.getContentBounds()
-      const { workArea } = screen.getDisplayMatching(contentBounds)
+      const workArea = selectMaximizedWorkArea(
+        [width, height],
+        screen.getAllDisplays(),
+        screen.getDisplayMatching(contentBounds).workArea,
+      )
       ;[width, height] = clampContentSizeToWorkArea(
         [width, height],
         contentBounds,
