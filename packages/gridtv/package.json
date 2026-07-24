@@ -46,7 +46,7 @@
   "author": "clearcmos <clear.cmos@outlook.com>",
   "license": "MIT",
   "dependencies": {
-    "@fontsource/noto-sans": "^5.2.10",
+    "@fontsource/noto-sans": "^5.3.0",
     "@iarna/toml": "^2.2.5",
     "@repeaterjs/repeater": "^3.1.0",
     "@sentry/electron": "^7.15.0",
@@ -67,11 +67,11 @@
     "react-icons": "^5.7.0",
     "reconnecting-websocket": "^4.4.0",
     "source-map-support": "^0.5.21",
-    "styled-components": "^6.4.3",
+    "styled-components": "^6.4.4",
     "update-electron-app": "^3.3.0",
     "utf-8-validate": "^6.0.6",
-    "ws": "^8.21.0",
-    "xstate": "^5.32.4",
+    "ws": "^8.21.1",
+    "xstate": "^5.32.5",
     "yjs": "^13.6.31",
     "zod": "^4.4.3"
   }
