@@ -17,7 +17,8 @@ smoke_dir="$(mktemp -d)"
 trap 'rm -rf -- "${smoke_dir}"' EXIT
 
 help_output="${smoke_dir}/help.log"
-XDG_CONFIG_HOME="${smoke_dir}/config" "${executable}" --help >"${help_output}" 2>&1
+XDG_CONFIG_HOME="${smoke_dir}/config" xvfb-run -a \
+  "${executable}" --help >"${help_output}" 2>&1
 grep -q "Grid dimensions" "${help_output}"
 
 startup_output="${smoke_dir}/startup.log"
