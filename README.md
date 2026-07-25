@@ -335,13 +335,18 @@ or by right-clicking the app and choosing "Open" instead of double-clicking.
 
 Pushing a `v*` tag (or running the workflow manually) triggers
 `.github/workflows/release.yml`, which runs the quality gate (lint, typecheck,
-test) and then builds and publishes a GitHub release for Linux, Windows, and
-macOS via `electron-forge publish`. Signing in CI is opt-in, matching the local
-`make`/`publish` behavior above: builds stay unsigned until the corresponding
-repository secrets are set (`APPLE_CERTIFICATE_P12`,
+coverage) and then builds and publishes a GitHub release for Linux, Windows,
+and macOS via `electron-forge publish`. Complete the
+[release checklist](docs/releasing.md) before tagging. Signing in CI is opt-in,
+matching the local `make`/`publish` behavior above: builds stay unsigned until
+the corresponding repository secrets are set (`APPLE_CERTIFICATE_P12`,
 `APPLE_CERTIFICATE_PASSWORD`, `APPLE_TEAM_ID`, `APPLE_API_KEY_BASE64`,
 `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, `WINDOWS_CERTIFICATE_BASE64`,
 `WINDOWS_CERTIFICATE_PASSWORD`).
+
+GitHub release notes are the user-facing changelog. The Conventional Commit
+history on `main` is the developer-facing record, so this repository does not
+maintain a duplicate `CHANGELOG.md`.
 
 ## Credits
 

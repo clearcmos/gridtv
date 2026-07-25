@@ -4,5 +4,9 @@
     "@tsconfig/node22/tsconfig",
     "@tsconfig/node-ts/tsconfig"
   ],
+  "compilerOptions": {
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true
+  },
   "include": ["src"]
 }

@@ -30,7 +30,7 @@ test('dispatchCommand invokes onCommand with the message and source', () => {
 test('dispatchCommand logs and swallows a rejection instead of leaking an unhandled rejection', async () => {
   const err = new Error('downstream failure')
   const onCommand = vi.fn().mockRejectedValue(err)
-  vi.spyOn(log, 'error').mockImplementation(() => undefined)
+  const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => undefined)
 
   dispatchCommand(onCommand, { type: 'ping' }, 'uplink')
 
@@ -39,8 +39,8 @@ test('dispatchCommand logs and swallows a rejection instead of leaking an unhand
   await new Promise((resolve) => setImmediate(resolve))
 
   assert.equal(unhandledRejections.length, 0)
-  assert.equal(log.error.mock.calls.length, 1)
-  const [message, loggedErr] = log.error.mock.calls[0]
+  assert.equal(errorSpy.mock.calls.length, 1)
+  const [message, loggedErr] = errorSpy.mock.calls[0]!
   assert.match(message, /uplink/)
   assert.equal(loggedErr, err)
 })
@@ -48,12 +48,12 @@ test('dispatchCommand logs and swallows a rejection instead of leaking an unhand
 test('dispatchCommand tags the logged error with the local source', async () => {
   const err = new Error('boom')
   const onCommand = vi.fn().mockRejectedValue(err)
-  vi.spyOn(log, 'error').mockImplementation(() => undefined)
+  const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => undefined)
 
   dispatchCommand(onCommand, { type: 'ping' }, 'local')
   await new Promise((resolve) => setImmediate(resolve))
 
-  const [message] = log.error.mock.calls[0]
+  const [message] = errorSpy.mock.calls[0]!
   assert.match(message, /local/)
 })
 
@@ -74,12 +74,21 @@ test('dispatchLocalCommand returns an error result from onCommand', async () => 
 test('dispatchLocalCommand converts a rejection into an error result', async () => {
   const err = new Error('boom')
   const onCommand = vi.fn().mockRejectedValue(err)
-  vi.spyOn(log, 'error').mockImplementation(() => undefined)
+  const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => undefined)
 
   const result = await dispatchLocalCommand(onCommand, { type: 'ping' })
 
   assert.deepEqual(result, { error: 'boom' })
-  assert.equal(log.error.mock.calls.length, 1)
+  assert.equal(errorSpy.mock.calls.length, 1)
+})
+
+test('dispatchLocalCommand stringifies a non-Error rejection', async () => {
+  const onCommand = vi.fn().mockRejectedValue('connection closed')
+  vi.spyOn(log, 'error').mockImplementation(() => undefined)
+
+  const result = await dispatchLocalCommand(onCommand, { type: 'ping' })
+
+  assert.deepEqual(result, { error: 'connection closed' })
 })
 
 test('dispatchLocalCommand returns undefined when onCommand succeeds', async () => {

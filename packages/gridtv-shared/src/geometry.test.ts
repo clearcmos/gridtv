@@ -14,6 +14,7 @@ import {
   gridWouldDropAssignments,
   hasGridAssignments,
   idxToCoords,
+  mergeLiveTilePositions,
   parseGridDimensionInput,
   remapGridAssignments,
 } from './geometry.ts'
@@ -93,6 +94,17 @@ describe('computeLiveTileLayout', () => {
   })
 })
 
+describe('mergeLiveTilePositions', () => {
+  it('ignores malformed positions without a cell index', () => {
+    expect(
+      mergeLiveTilePositions(
+        [{ x: 0, y: 0, width: 100, height: 100, spaces: [] }],
+        [0],
+      ),
+    ).toBeUndefined()
+  })
+})
+
 describe('idxToCoords', () => {
   it('maps an index to grid coordinates', () => {
     expect(idxToCoords(3, 4)).toEqual({ x: 1, y: 1 })
@@ -113,7 +125,7 @@ describe('boxesFromViewContentMap', () => {
     const boxes = boxesFromViewContentMap(8, 8, viewContentMap)
 
     expect(boxes).toHaveLength(1)
-    expect(boxes[0].spaces).toEqual([2, 10])
+    expect(boxes[0]!.spaces).toEqual([2, 10])
   })
 
   it('returns no boxes for an empty content map', () => {
@@ -436,7 +448,7 @@ describe('fullscreenViewContentMap', () => {
     const map = fullscreenViewContentMap(4, 3, content)
     const boxes = boxesFromViewContentMap(4, 3, map)
     expect(boxes).toHaveLength(1)
-    expect(boxes[0].spaces).toEqual([...Array(12).keys()])
+    expect(boxes[0]!.spaces).toEqual([...Array(12).keys()])
     expect(boxes[0]).toMatchObject({ x: 0, y: 0, w: 4, h: 3 })
   })
 
@@ -447,6 +459,6 @@ describe('fullscreenViewContentMap', () => {
       fullscreenViewContentMap(1, 1, content),
     )
     expect(boxes).toHaveLength(1)
-    expect(boxes[0].spaces).toEqual([0])
+    expect(boxes[0]!.spaces).toEqual([0])
   })
 })

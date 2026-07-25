@@ -15,7 +15,6 @@
  * @see https://www.electronjs.org/docs/latest/api/session
  */
 
-import type { Session } from 'electron'
 import type { StreamSessionMode } from '../mediaConfig'
 import { createSessionHostResolver, findRequestBlockReason } from '../util'
 import log from './logger'
@@ -77,6 +76,18 @@ interface RequestFilteringSession {
     onBeforeRequest(listener: RequestListener): void
   }
   resolveHost(host: string): Promise<{ endpoints: { address: string }[] }>
+}
+
+interface HardenableSession extends RequestFilteringSession {
+  setPermissionRequestHandler(
+    handler:
+      | ((
+          webContents: unknown,
+          permission: string,
+          callback: (granted: boolean) => void,
+        ) => void)
+      | null,
+  ): void
 }
 
 // A shared partition returns the same Electron Session object to every view.
@@ -176,8 +187,7 @@ export function installRequestSSRFGuard(
  * isolated partition rather than once for a shared one.
  */
 export function hardenSession(
-  session: Pick<Session, 'setPermissionRequestHandler'> &
-    RequestFilteringSession,
+  session: HardenableSession,
   options: RequestGuardOptions = {},
 ): void {
   if (hardenedSessions.has(session)) {

@@ -41,7 +41,7 @@ describe('mediaPreload visibility spoofing', () => {
     await import('./mediaPreload')
 
     expect(executeJavaScript).toHaveBeenCalledTimes(1)
-    const [code] = executeJavaScript.mock.calls[0]
+    const [code] = executeJavaScript.mock.calls[0]!
     expect(code).toContain(`'visibilityState'`)
     expect(code).toContain(`value: 'visible'`)
     expect(code).toContain(`'hidden'`)

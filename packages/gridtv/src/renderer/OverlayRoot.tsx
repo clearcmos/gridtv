@@ -560,6 +560,9 @@ export function Overlay({
   const renderedStreamIds = new Set<string>()
   for (const basePos of baseLayout) {
     const baseViewIdx = basePos.spaces[0]
+    if (baseViewIdx === undefined) {
+      continue
+    }
     const view = viewsBySpace.get(baseViewIdx)
     if (view && view.context.pos && !renderedViewIds.has(view.context.id)) {
       renderedViewIds.add(view.context.id)

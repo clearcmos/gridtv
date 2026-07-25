@@ -88,7 +88,10 @@ export function mergeLiveTilePositions(
   spaces: readonly number[],
 ): ViewPos | undefined {
   const wanted = new Set(spaces)
-  const selected = positions.filter((pos) => wanted.has(pos.spaces[0]))
+  const selected = positions.filter((pos) => {
+    const space = pos.spaces[0]
+    return space !== undefined && wanted.has(space)
+  })
   if (selected.length === 0) {
     return undefined
   }
@@ -102,7 +105,12 @@ export function mergeLiveTilePositions(
     y: top,
     width: right - left,
     height: bottom - top,
-    spaces: selected.map((pos) => pos.spaces[0]).sort((a, b) => a - b),
+    spaces: selected
+      .flatMap((pos) => {
+        const space = pos.spaces[0]
+        return space === undefined ? [] : [space]
+      })
+      .sort((a, b) => a - b),
   }
 }
 
@@ -147,6 +155,9 @@ export function computeLiveTileSpanSpaces(
     changed = false
     for (const pos of positions) {
       const space = pos.spaces[0]
+      if (space === undefined) {
+        continue
+      }
       if (!selected.has(space) && rectanglesOverlap(pos, bounds)) {
         selected.add(space)
         changed = true
@@ -177,6 +188,9 @@ export function computeLiveTileContentLayout(
 
   for (const pos of positions) {
     const space = pos.spaces[0]
+    if (space === undefined) {
+      continue
+    }
     const content = viewContentMap.get(String(space))
     if (!content) {
       continue

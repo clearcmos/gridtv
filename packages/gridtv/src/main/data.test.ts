@@ -75,7 +75,7 @@ link = "https://c.example/s"
         'https://c.example/s',
       ])
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -93,7 +93,7 @@ _dataSource = "attacker"
       expect(value?.[0]).not.toHaveProperty('_id')
       expect(value?.[0]).not.toHaveProperty('_dataSource')
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -104,7 +104,7 @@ _dataSource = "attacker"
       const { value } = await gen.next()
       expect(value).toEqual([])
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -139,7 +139,7 @@ link = "https://b.example/s"
         'https://b.example/s',
       ])
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -169,7 +169,7 @@ link = "https://b.example/s"
         'https://b.example/s',
       ])
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -224,7 +224,7 @@ link = "https://b.example/s"
         'https://b.example/s',
       ])
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -239,7 +239,7 @@ link = "https://a.example/s"
       await gen.next()
       expect(onHealth).toHaveBeenCalledWith(true)
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -254,7 +254,7 @@ link = "https://a.example/s"
       await gen.next()
       expect(onHealth).toHaveBeenCalledWith(false, expect.any(String))
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -282,7 +282,7 @@ link = "https://a.example/s"
     // return() without waiting on one.
     await expect(
       Promise.race([
-        gen.return(undefined),
+        gen.return?.(undefined),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('return() hung')), 500),
         ),
@@ -326,7 +326,7 @@ describe('pollDataURL', () => {
       ])
       expect(value?.[1]).not.toHaveProperty('_id')
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -337,7 +337,7 @@ describe('pollDataURL', () => {
       const { value } = await gen.next()
       expect(value).toEqual([])
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -349,7 +349,7 @@ describe('pollDataURL', () => {
       await gen.next()
       expect(onHealth).toHaveBeenCalledWith(true)
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -361,7 +361,7 @@ describe('pollDataURL', () => {
       await gen.next()
       expect(onHealth).toHaveBeenCalledWith(false, expect.any(String))
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 
@@ -403,7 +403,7 @@ describe('pollDataURL', () => {
         'https://b.example/s',
       ])
     } finally {
-      await gen.return(undefined)
+      await gen.return?.(undefined)
     }
   })
 })
@@ -421,7 +421,7 @@ describe('StreamIDGenerator', () => {
       stream({ link: 'https://a.example/s', source: 'Example Source' }),
     ]
     gen.process(streams)
-    expect(streams[0]._id).toBe('exa')
+    expect(streams[0]!._id).toBe('exa')
   })
 
   test('resolves collisions with an incrementing numeric suffix', () => {
@@ -441,7 +441,7 @@ describe('StreamIDGenerator', () => {
       stream({ link: 'https://a.example/s', source: 'The Stream' }),
     ]
     gen.process(streams)
-    expect(streams[0]._id).toBe('str')
+    expect(streams[0]!._id).toBe('str')
   })
 
   test('strips a leading http(s)/www prefix before deriving the id', () => {
@@ -453,29 +453,29 @@ describe('StreamIDGenerator', () => {
       }),
     ]
     gen.process(streams)
-    expect(streams[0]._id).toBe('exa')
+    expect(streams[0]!._id).toBe('exa')
   })
 
   test('skips a stream with no usable id base and leaves it without an id', () => {
     const gen = new StreamIDGenerator()
     const streams = [stream({ link: '' })]
     gen.process(streams)
-    expect(streams[0]._id).toBeUndefined()
+    expect(streams[0]!._id).toBeUndefined()
   })
 
   test('keeps a stable id for the same link across repeated process() calls', () => {
     const gen = new StreamIDGenerator()
     const first = [stream({ link: 'https://a.example/s', source: 'Example' })]
     gen.process(first)
-    expect(first[0]._id).toBe('exa')
+    expect(first[0]!._id).toBe('exa')
 
     const second = [
       stream({ link: 'https://a.example/s', source: 'Example' }),
       stream({ link: 'https://b.example/s', source: 'Example' }),
     ]
     gen.process(second)
-    expect(second[0]._id).toBe('exa')
-    expect(second[1]._id).toBe('exa1')
+    expect(second[0]!._id).toBe('exa')
+    expect(second[1]!._id).toBe('exa1')
   })
 
   test('honors a persisted custom-source id across fresh generators and reordering', () => {
@@ -585,7 +585,9 @@ describe('LocalStreamData', () => {
     const iterator = data.gen()
     try {
       const first = await iterator.next()
-      expect(first.value?.map((s) => s.link)).toEqual(['https://a.example/s'])
+      expect(first.value?.map((s: StreamDataContent) => s.link)).toEqual([
+        'https://a.example/s',
+      ])
 
       // Starting the next pull is what lets the generator's buffered push()
       // resolve and reach the `this.on('update', push)` line (the Repeater's
@@ -594,7 +596,7 @@ describe('LocalStreamData', () => {
       await waitForListener(data, 'update')
       data.update('https://b.example/s', { kind: 'video' })
       const second = await pending
-      expect(second.value?.map((s) => s.link)).toEqual([
+      expect(second.value?.map((s: StreamDataContent) => s.link)).toEqual([
         'https://a.example/s',
         'https://b.example/s',
       ])
@@ -606,10 +608,10 @@ describe('LocalStreamData', () => {
 
 describe('combineDataSources', () => {
   test('merges entries from multiple sources by link, letting later sources override fields', async () => {
-    async function* sourceA() {
+    async function* sourceA(): AsyncGenerator<StreamDataContent[]> {
       yield [{ kind: 'video', link: 'https://a.example/s', label: 'From A' }]
     }
-    async function* sourceB() {
+    async function* sourceB(): AsyncGenerator<StreamDataContent[]> {
       yield [
         {
           kind: 'video',
@@ -637,7 +639,7 @@ describe('combineDataSources', () => {
   })
 
   test('attaches a byURL index to the yielded list for quick lookups', async () => {
-    async function* sourceA() {
+    async function* sourceA(): AsyncGenerator<StreamDataContent[]> {
       yield [{ kind: 'video', link: 'https://a.example/s' }]
     }
     const gen = combineDataSources([sourceA()], new StreamIDGenerator())
@@ -652,13 +654,13 @@ describe('combineDataSources', () => {
   })
 
   test('assigns stream ids via the provided StreamIDGenerator', async () => {
-    async function* sourceA() {
+    async function* sourceA(): AsyncGenerator<StreamDataContent[]> {
       yield [{ kind: 'video', link: 'https://a.example/s', source: 'Example' }]
     }
     const gen = combineDataSources([sourceA()], new StreamIDGenerator())
     try {
       const { value } = await gen.next()
-      expect(value?.[0]._id).toBe('exa')
+      expect(value?.[0]?._id).toBe('exa')
     } finally {
       await gen.return?.(undefined)
     }
@@ -667,7 +669,7 @@ describe('combineDataSources', () => {
 
 describe('markDataSource', () => {
   test('tags every stream in every yielded batch with the data source name', async () => {
-    async function* source() {
+    async function* source(): AsyncGenerator<StreamDataContent[]> {
       yield [{ kind: 'video', link: 'https://a.example/s' }]
       yield [
         { kind: 'video', link: 'https://a.example/s' },
@@ -770,7 +772,7 @@ describe('combineDataSources', () => {
     a.update('https://a.example/s', { label: 'updated' })
     await pending
 
-    await expect(gen.return(undefined)).resolves.toBeDefined()
+    await expect(gen.return?.(undefined)).resolves.toBeDefined()
   })
 })
 

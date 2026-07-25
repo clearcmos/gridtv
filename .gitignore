@@ -31,6 +31,7 @@ storage.json
 .cache/
 .eslintcache
 .npm/
+coverage/
 
 # Playwright (E2E) artifacts
 test-results/

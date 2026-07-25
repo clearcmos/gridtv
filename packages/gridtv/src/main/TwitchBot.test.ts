@@ -1,8 +1,10 @@
 import type { PrivmsgMessage } from 'dank-twitch-irc'
 import { EventEmitter } from 'events'
-import type { StreamData } from 'gridtv-shared'
+import type { StreamData, StreamwallState } from 'gridtv-shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type TwitchBotType from './TwitchBot'
+
+class FakeLoginError extends Error {}
 
 class FakeChatClient extends EventEmitter {
   ready = false
@@ -20,7 +22,7 @@ vi.mock('dank-twitch-irc', () => ({
   ChatClient: vi.fn().mockImplementation(function ChatClient() {
     return fakeClient
   }),
-  LoginError: class LoginError extends Error {},
+  LoginError: FakeLoginError,
   SlowModeRateLimiter: vi.fn(),
 }))
 
@@ -76,6 +78,28 @@ describe('TwitchBot', () => {
     expect(unhandledRejections).toEqual([])
   })
 
+  it('forwards connect and closes only after a login error', () => {
+    const bot = new TwitchBot(CONFIG)
+
+    bot.connect()
+    expect(fakeClient.connect).toHaveBeenCalledOnce()
+
+    fakeClient.emit('error', new Error('temporary failure'))
+    expect(fakeClient.close).not.toHaveBeenCalled()
+
+    fakeClient.emit('error', new FakeLoginError('bad credentials'))
+    expect(fakeClient.close).toHaveBeenCalledOnce()
+  })
+
+  it('handles clean and error disconnect notifications', () => {
+    new TwitchBot(CONFIG)
+
+    expect(() => fakeClient.emit('close', null)).not.toThrow()
+    expect(() =>
+      fakeClient.emit('close', new Error('connection lost')),
+    ).not.toThrow()
+  })
+
   it('does not crash the process when onReady rejects', async () => {
     fakeClient.setColor.mockRejectedValue(new Error('setColor failed'))
     new TwitchBot(CONFIG)
@@ -127,8 +151,9 @@ describe('TwitchBot', () => {
     const bot = new TwitchBot(CONFIG)
 
     bot.onMsg({ messageText: '!2' } as PrivmsgMessage)
+    bot.onMsg({ messageText: '!2' } as PrivmsgMessage)
 
-    expect(bot.votes.get(2)).toBe(1)
+    expect(bot.votes.get(2)).toBe(2)
   })
 
   it('ignores chat messages that do not match the vote pattern', () => {
@@ -136,6 +161,131 @@ describe('TwitchBot', () => {
 
     bot.onMsg({ messageText: 'hello there' } as PrivmsgMessage)
 
+    expect(bot.votes.size).toBe(0)
+  })
+
+  it('ignores votes when voting is disabled', () => {
+    const bot = new TwitchBot({
+      ...CONFIG,
+      vote: { ...CONFIG.vote, interval: 0 },
+    })
+
+    bot.onMsg({ messageText: '!2' } as PrivmsgMessage)
+
+    expect(bot.votes).toBeUndefined()
+  })
+
+  it('tracks a newly-listened stream but ignores absent or unchanged audio', () => {
+    const bot = new TwitchBot(CONFIG)
+    const onListeningURLChange = vi.spyOn(bot, 'onListeningURLChange')
+    const state = (viewState: string, url = STREAM.link) =>
+      ({
+        streams: [STREAM],
+        views: [
+          {
+            state: viewState,
+            context: { content: { url } },
+          },
+        ],
+      }) as unknown as StreamwallState
+
+    bot.onState(state('displaying.running.audio.muted'))
+    expect(onListeningURLChange).not.toHaveBeenCalled()
+
+    bot.onState(state('displaying.running.audio.listening'))
+    expect(onListeningURLChange).toHaveBeenCalledWith(STREAM.link)
+
+    onListeningURLChange.mockClear()
+    bot.onState(state('displaying.running.audio.listening'))
+    expect(onListeningURLChange).not.toHaveBeenCalled()
+  })
+
+  it('does not schedule announcements for an empty listening URL', () => {
+    const bot = new TwitchBot(CONFIG)
+    const announce = vi.spyOn(bot, 'announce')
+
+    bot.onListeningURLChange(null)
+    vi.advanceTimersByTime(CONFIG.announce.delay * 1000)
+
+    expect(announce).not.toHaveBeenCalled()
+  })
+
+  it('does not announce a URL that already has a repeat timer', () => {
+    const bot = new TwitchBot(CONFIG)
+    const announce = vi.spyOn(bot, 'announce')
+    bot.announceTimeouts.set(
+      STREAM.link,
+      setTimeout(() => {}, 60_000),
+    )
+
+    bot.onListeningURLChange(STREAM.link)
+    vi.advanceTimersByTime(CONFIG.announce.delay * 1000)
+
+    expect(announce).not.toHaveBeenCalled()
+  })
+
+  it('announces only when the client, URL, and stream are ready', async () => {
+    const bot = new TwitchBot(CONFIG)
+    bot.listeningURL = STREAM.link
+
+    await bot.announce()
+    expect(fakeClient.say).not.toHaveBeenCalled()
+
+    fakeClient.ready = true
+    bot.listeningURL = null
+    await bot.announce()
+    expect(fakeClient.say).not.toHaveBeenCalled()
+
+    bot.listeningURL = STREAM.link
+    await bot.announce()
+    expect(fakeClient.say).not.toHaveBeenCalled()
+
+    bot.streams = [STREAM]
+    await bot.announce()
+    expect(fakeClient.say).toHaveBeenCalledWith(
+      CONFIG.channel,
+      CONFIG.announce.template,
+    )
+  })
+
+  it('does not repeat an announcement after listening moves elsewhere', async () => {
+    fakeClient.ready = true
+    const bot = new TwitchBot(CONFIG)
+    bot.streams = [STREAM]
+    bot.listeningURL = STREAM.link
+
+    await bot.announce()
+    bot.listeningURL = 'https://example.com/other'
+    await vi.advanceTimersByTimeAsync(CONFIG.announce.interval * 1000)
+
+    expect(fakeClient.say).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns early when there are no votes or no positive winner', async () => {
+    const bot = new TwitchBot(CONFIG)
+
+    await bot.tallyVotes()
+    bot.votes.set(1, 0)
+    await bot.tallyVotes()
+
+    expect(fakeClient.say).not.toHaveBeenCalled()
+  })
+
+  it('announces the highest vote, emits its zero-based view, and resets', async () => {
+    const bot = new TwitchBot(CONFIG)
+    const setListeningView = vi.fn()
+    bot.on('setListeningView', setListeningView)
+    bot.votes.set(1, 2)
+    bot.votes.set(2, 4)
+    bot.votes.set(3, 4)
+
+    await bot.tallyVotes()
+
+    expect(fakeClient.say).toHaveBeenCalledWith(
+      CONFIG.channel,
+      CONFIG.vote.template,
+    )
+    expect(setListeningView).toHaveBeenCalledWith(1)
     expect(bot.votes.size).toBe(0)
   })
 

@@ -208,6 +208,9 @@ export function resizeLiveWallAssignment(
   const positions = computeLiveTileLayout(count, 2520, 2520)
   const center = (idx: number) => {
     const pos = positions[idx]
+    if (!pos) {
+      throw new RangeError(`Missing layout position for live-wall cell ${idx}`)
+    }
     return { x: pos.x + pos.width / 2, y: pos.y + pos.height / 2 }
   }
   const movedStreamIds: string[] = []
@@ -232,7 +235,11 @@ export function resizeLiveWallAssignment(
         (rightCenter.x - oldCenter.x) ** 2 + (rightCenter.y - oldCenter.y) ** 2
       return leftDistance - rightDistance || left - right
     })
-    nextAssignments[freeSpaces[0]] = streamId
+    const destination = freeSpaces[0]
+    if (destination === undefined) {
+      throw new Error('Expected a free live-wall cell')
+    }
+    nextAssignments[destination] = streamId
     movedStreamIds.push(streamId)
   }
 

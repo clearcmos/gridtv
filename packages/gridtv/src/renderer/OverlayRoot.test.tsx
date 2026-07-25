@@ -810,16 +810,22 @@ describe('self-contained wall controls', () => {
     expect(getComputedStyle(username).opacity).toBe('1')
     expect(getComputedStyle(picker).opacity).toBe('1')
 
-    act(() => vi.advanceTimersByTime(WALL_CHROME_IDLE_MS - 500))
+    act(() => {
+      vi.advanceTimersByTime(WALL_CHROME_IDLE_MS - 500)
+    })
     act(() => {
       tile.dispatchEvent(
         new PointerEvent('pointermove', { pointerId: 9, bubbles: true }),
       )
     })
-    act(() => vi.advanceTimersByTime(500))
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
     expect(tile.getAttribute('data-wall-chrome-visible')).toBe('true')
 
-    act(() => vi.advanceTimersByTime(WALL_CHROME_IDLE_MS - 500))
+    act(() => {
+      vi.advanceTimersByTime(WALL_CHROME_IDLE_MS - 500)
+    })
     expect(tile.getAttribute('data-wall-chrome-visible')).toBe('false')
     expect(getComputedStyle(controls).opacity).toBe('0')
     expect(getComputedStyle(username).opacity).toBe('0')

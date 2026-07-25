@@ -16,6 +16,10 @@ export function parseGithubRepository(repository: string): RepositoryOwnerName {
       `Expected package.json "repository" to be in "github:owner/name" form, got: ${repository}`,
     )
   }
-  const [, owner, name] = match
+  const owner = match[1]
+  const name = match[2]
+  if (!owner || !name) {
+    throw new Error(`Incomplete GitHub repository shorthand: ${repository}`)
+  }
   return { owner, name }
 }

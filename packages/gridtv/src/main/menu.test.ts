@@ -154,6 +154,22 @@ describe('buildApplicationMenuTemplate "Create Example Config" item', () => {
       err,
     )
   })
+
+  it('stringifies a non-Error config write failure', () => {
+    createExampleConfig.mockImplementationOnce(() => {
+      throw 'permission denied'
+    })
+    vi.spyOn(log, 'error').mockImplementation(() => log)
+    const template = buildApplicationMenuTemplate(CONFIG_PATH, LOG_PATH, false)
+
+    const item = findMenuItem(template, 'Create Example Config')
+    ;(item.click as () => void)()
+
+    expect(showErrorBox).toHaveBeenCalledWith(
+      'Could not create example config',
+      'permission denied',
+    )
+  })
 })
 
 describe('installApplicationMenu', () => {

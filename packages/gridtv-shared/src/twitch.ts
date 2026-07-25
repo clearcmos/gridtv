@@ -32,10 +32,15 @@ export function twitchLoginFromInput(input: string): string | null {
     return null
   }
   const segments = parsed.pathname.split('/').filter(Boolean)
-  if (segments.length !== 1 || !TWITCH_LOGIN_RE.test(segments[0])) {
+  const login = segments[0]
+  if (
+    segments.length !== 1 ||
+    login === undefined ||
+    !TWITCH_LOGIN_RE.test(login)
+  ) {
     return null
   }
-  return segments[0].toLowerCase()
+  return login.toLowerCase()
 }
 
 export function twitchChannelUrl(login: string): string {

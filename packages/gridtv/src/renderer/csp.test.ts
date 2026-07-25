@@ -10,11 +10,13 @@ function readCSP(fileName: string): string {
   const match = html.match(
     /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i,
   )
-  expect(
-    match,
-    `${fileName} must declare a Content-Security-Policy meta tag`,
-  ).not.toBeNull()
-  return match![1]
+  const policy = match?.[1]
+  if (policy === undefined) {
+    throw new Error(
+      `${fileName} must declare a Content-Security-Policy meta tag`,
+    )
+  }
+  return policy
 }
 
 /**
@@ -28,6 +30,9 @@ function parseCSP(csp: string): Map<string, string[]> {
       continue
     }
     const [name, ...sources] = tokens
+    if (name === undefined) {
+      continue
+    }
     directives.set(name.toLowerCase(), sources)
   }
   return directives

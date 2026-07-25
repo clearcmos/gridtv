@@ -9,7 +9,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "test:coverage": "npm run test:coverage --workspaces --if-present"
   },
   "workspaces": [
     "packages/gridtv",
@@ -24,8 +25,16 @@
       }
     }
   },
+  "allowScripts": {
+    "bufferutil@4.1.0": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.28.1": true,
+    "unrs-resolver@1.12.2": true,
+    "utf-8-validate@6.0.6": true
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.7.0",
     "eslint-import-resolver-typescript": "^4.4.5",
     "eslint-plugin-import-x": "^4.17.1",

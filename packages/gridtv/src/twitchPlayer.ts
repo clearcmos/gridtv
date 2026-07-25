@@ -48,18 +48,20 @@ export function twitchPlayerURL(rawURL: string, enabled = true): string {
 
   const host = url.hostname.toLowerCase().replace(/^www\./, '')
   const path = url.pathname.split('/').filter(Boolean)
+  const channel = path[0]
   if (
     url.protocol !== 'https:' ||
     host !== 'twitch.tv' ||
     path.length !== 1 ||
-    !TWITCH_CHANNEL_PATTERN.test(path[0]) ||
-    TWITCH_RESERVED_PATHS.has(path[0].toLowerCase())
+    channel === undefined ||
+    !TWITCH_CHANNEL_PATTERN.test(channel) ||
+    TWITCH_RESERVED_PATHS.has(channel.toLowerCase())
   ) {
     return rawURL
   }
 
   const playerURL = new URL(`https://${TWITCH_PLAYER_HOST}/`)
-  playerURL.searchParams.set('channel', path[0])
+  playerURL.searchParams.set('channel', channel)
   playerURL.searchParams.set('parent', TWITCH_PLAYER_HOST)
   playerURL.searchParams.set('autoplay', 'true')
   playerURL.searchParams.set('muted', 'true')

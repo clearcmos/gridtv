@@ -713,9 +713,9 @@ describe('streamwallStateSchema', () => {
     const result = streamwallStateSchema.safeParse(full)
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data.views[1].context.wallAudioMode).toBe('unmuted')
-      expect(result.data.views[1].context.isPaused).toBe(true)
-      expect(result.data.views[1].context.wallFitMode).toBe('fill')
+      expect(result.data.views[1]!.context.wallAudioMode).toBe('unmuted')
+      expect(result.data.views[1]!.context.isPaused).toBe(true)
+      expect(result.data.views[1]!.context.wallFitMode).toBe('fill')
     }
   })
 
