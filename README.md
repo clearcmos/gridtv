@@ -178,12 +178,15 @@ the app runs. Pending writes are flushed before quit. Custom Twitch sources use
 stable URL-derived IDs, so removing or reordering sources cannot detach the
 saved layout on the next launch.
 
-The overlay window also supports these keyboard controls:
+The wall supports these keyboard controls:
 
+- **F1**: Open or close the tile-count menu
+- **F2**: Toggle every tile between Fit and Fill
 - **F**: Toggle fullscreen for the hovered stream
 - **E**: Toggle mute for the hovered stream
 - **C**: Toggle the right-side Twitch chat dock while fullscreen
-- **ctrl+shift+i**: Open devtools for the overlay
+- **Escape**: Close the tile-count menu or restore the wall from fullscreen
+- **Ctrl+Shift+I**: Open devtools for the overlay
 
 ### Optional compatibility uplink
 

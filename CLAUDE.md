@@ -46,11 +46,16 @@ npm workspaces monorepo (Node >= 22), two packages:
 - `packages/gridtv` - the Electron app.
   - `src/main/` - main process (window management, config, data sources,
     Twitch search/bot, Streamdelay client, the optional remote uplink,
-    `viewStateMachine` built on XState).
+    `viewStateMachine` built on XState). `liveWallSession` owns persisted wall
+    assignments, settings, transient fullscreen state, and their projection to
+    `StreamWindow`.
   - `src/preload/` - sandboxed preload bridges (`layerPreload`, `mediaPreload`,
     plus `snapshotController` / `volumeController` helpers).
   - `src/renderer/` - Preact renderers for the wall: `overlay` (the wall UI),
     `background`, and `playHLS`. Styled with styled-components.
+  - `src/wallShortcuts.ts` - semantic shortcut routing shared by the main,
+    preload, and renderer bundles; key-down/key-up state deduplicates Electron
+    events without clock-based heuristics.
   - `forge.config.ts` / `forge.signing.ts` / `forge.publisher.ts` - Electron
     Forge build, code-signing, and GitHub publish config.
   - `vite.*.config.ts` - Vite build configs for main, preload, renderer.

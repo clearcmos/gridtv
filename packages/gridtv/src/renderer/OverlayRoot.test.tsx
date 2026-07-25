@@ -8,6 +8,11 @@ import type {
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import type {
+  WallShortcut,
+  WallShortcutBridge,
+  WallShortcutInput,
+} from '../wallShortcuts'
 import { Overlay, WALL_CHROME_IDLE_MS } from './OverlayRoot'
 
 let container: HTMLDivElement | undefined
@@ -60,6 +65,32 @@ function makeStream(label: string): StreamData {
     kind: 'video',
     link: `https://example.com/${label}`,
     label,
+  }
+}
+
+function pressKey(key: string) {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key }))
+  window.dispatchEvent(new KeyboardEvent('keyup', { key }))
+}
+
+function controlledShortcutBridge() {
+  let handler: ((shortcut: WallShortcut) => void) | undefined
+  const bridge: WallShortcutBridge = {
+    send: vi.fn((_input: WallShortcutInput) => {}),
+    subscribe: vi.fn((next) => {
+      handler = next
+      return () => {
+        if (handler === next) {
+          handler = undefined
+        }
+      }
+    }),
+  }
+  return {
+    bridge,
+    emit(shortcut: WallShortcut) {
+      handler?.(shortcut)
+    },
   }
 }
 
@@ -137,7 +168,7 @@ describe('self-contained wall controls', () => {
     })
 
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F1' }))
+      pressKey('F1')
     })
     expect(container.querySelector('[data-testid="grid-size-menu"]')).not.toBe(
       null,
@@ -181,7 +212,7 @@ describe('self-contained wall controls', () => {
     })
 
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2' }))
+      pressKey('F2')
     })
     expect(onControl).toHaveBeenLastCalledWith({
       type: 'set-wall-fit-mode-all',
@@ -205,7 +236,7 @@ describe('self-contained wall controls', () => {
       )
     })
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2' }))
+      pressKey('F2')
     })
     expect(onControl).toHaveBeenLastCalledWith({
       type: 'set-wall-fit-mode-all',
@@ -226,13 +257,14 @@ describe('self-contained wall controls', () => {
       )
     })
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2' }))
+      pressKey('F2')
     })
     expect(onControl).not.toHaveBeenCalled()
   })
 
   test('handles an F2 shortcut forwarded from a focused stream view', () => {
     const onControl = vi.fn()
+    const shortcuts = controlledShortcutBridge()
     container = document.createElement('div')
     document.body.appendChild(container)
 
@@ -243,12 +275,13 @@ describe('self-contained wall controls', () => {
           views={[makeView(0, 'view-0')]}
           streams={[makeStream('view-0')]}
           fullscreenViewIdx={null}
-          fitModeShortcut={1}
+          shortcutBridge={shortcuts.bridge}
           onControl={onControl}
         />,
         container!,
       )
     })
+    act(() => shortcuts.emit({ type: 'cycle-fit-mode' }))
 
     expect(onControl).toHaveBeenCalledWith({
       type: 'set-wall-fit-mode-all',
@@ -410,7 +443,7 @@ describe('self-contained wall controls', () => {
     })
 
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      pressKey('Escape')
     })
     expect(onControl).toHaveBeenLastCalledWith({
       type: 'set-wall-fullscreen',
@@ -421,29 +454,19 @@ describe('self-contained wall controls', () => {
 
   test('a forwarded Escape exits fullscreen once without reverting later entries', () => {
     const onControl = vi.fn()
+    const shortcuts = controlledShortcutBridge()
     container = document.createElement('div')
     document.body.appendChild(container)
     const props = {
       config: makeConfig(1),
       views: [makeView(0, 'view-0')],
       streams: [makeStream('view-0')],
+      shortcutBridge: shortcuts.bridge,
       onControl,
     }
-    act(() =>
-      render(
-        <Overlay {...props} fullscreenViewIdx={0} fullscreenExitShortcut={0} />,
-        container!,
-      ),
-    )
+    act(() => render(<Overlay {...props} fullscreenViewIdx={0} />, container!))
 
-    // Escape pressed while a stream view held keyboard focus arrives as a
-    // counter increment forwarded from the main process.
-    act(() =>
-      render(
-        <Overlay {...props} fullscreenViewIdx={0} fullscreenExitShortcut={1} />,
-        container!,
-      ),
-    )
+    act(() => shortcuts.emit({ type: 'exit-fullscreen' }))
     expect(onControl).toHaveBeenCalledWith({
       type: 'set-wall-fullscreen',
       viewIdx: 0,
@@ -451,24 +474,12 @@ describe('self-contained wall controls', () => {
     })
     expect(onControl).toHaveBeenCalledTimes(1)
 
-    // The wall restores, then the user enters fullscreen again. The stale
-    // counter must not fire a second exit and instantly revert the entry.
+    // The wall restores, then the user enters fullscreen again. A consumed
+    // event is not component state, so rerendering cannot replay it.
     act(() =>
-      render(
-        <Overlay
-          {...props}
-          fullscreenViewIdx={null}
-          fullscreenExitShortcut={1}
-        />,
-        container!,
-      ),
+      render(<Overlay {...props} fullscreenViewIdx={null} />, container!),
     )
-    act(() =>
-      render(
-        <Overlay {...props} fullscreenViewIdx={0} fullscreenExitShortcut={1} />,
-        container!,
-      ),
-    )
+    act(() => render(<Overlay {...props} fullscreenViewIdx={0} />, container!))
     expect(onControl).toHaveBeenCalledTimes(1)
   })
 
@@ -497,7 +508,7 @@ describe('self-contained wall controls', () => {
         .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
     })
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
+      pressKey('f')
     })
     expect(onControl).toHaveBeenLastCalledWith({
       type: 'set-wall-fullscreen',
@@ -519,7 +530,7 @@ describe('self-contained wall controls', () => {
       )
     })
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F' }))
+      pressKey('F')
     })
     expect(onControl).toHaveBeenLastCalledWith({
       type: 'set-wall-fullscreen',
@@ -527,78 +538,6 @@ describe('self-contained wall controls', () => {
       fullscreen: false,
     })
     expect(onControl).toHaveBeenCalledTimes(2)
-  })
-
-  test('deduplicates a DOM tile key followed by its forwarded copy', () => {
-    const now = vi.spyOn(Date, 'now').mockReturnValue(1000)
-    try {
-      const onControl = vi.fn()
-      container = document.createElement('div')
-      document.body.appendChild(container)
-      const props = {
-        config: makeConfig(1),
-        views: [makeView(0, 'view-0')],
-        streams: [makeStream('view-0')],
-        fullscreenViewIdx: null,
-        onControl,
-      }
-      act(() => render(<Overlay {...props} />, container!))
-      act(() => {
-        container!
-          .querySelector('[data-wall-tile]')!
-          .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
-      })
-
-      act(() => {
-        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
-      })
-      act(() => {
-        render(
-          <Overlay {...props} tileKeyShortcut={{ key: 'f', sequence: 1 }} />,
-          container!,
-        )
-      })
-
-      expect(onControl).toHaveBeenCalledTimes(1)
-    } finally {
-      now.mockRestore()
-    }
-  })
-
-  test('deduplicates a forwarded tile key followed by its DOM copy', () => {
-    const now = vi.spyOn(Date, 'now').mockReturnValue(1000)
-    try {
-      const onControl = vi.fn()
-      container = document.createElement('div')
-      document.body.appendChild(container)
-      const props = {
-        config: makeConfig(1),
-        views: [makeView(0, 'view-0')],
-        streams: [makeStream('view-0')],
-        fullscreenViewIdx: null,
-        onControl,
-      }
-      act(() => render(<Overlay {...props} />, container!))
-      act(() => {
-        container!
-          .querySelector('[data-wall-tile]')!
-          .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
-      })
-
-      act(() => {
-        render(
-          <Overlay {...props} tileKeyShortcut={{ key: 'f', sequence: 1 }} />,
-          container!,
-        )
-      })
-      act(() => {
-        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
-      })
-
-      expect(onControl).toHaveBeenCalledTimes(1)
-    } finally {
-      now.mockRestore()
-    }
   })
 
   test('E toggles mute for the hovered stream', () => {
@@ -624,7 +563,7 @@ describe('self-contained wall controls', () => {
         .dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
     })
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'e' }))
+      pressKey('e')
     })
 
     expect(onControl).toHaveBeenLastCalledWith({
@@ -660,7 +599,7 @@ describe('self-contained wall controls', () => {
       )
     })
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c' }))
+      pressKey('c')
     })
     expect(onControl).toHaveBeenLastCalledWith({
       type: 'set-wall-chat-visible',
@@ -685,7 +624,7 @@ describe('self-contained wall controls', () => {
     ).toBe('58px')
 
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'C' }))
+      pressKey('C')
     })
     expect(onControl).toHaveBeenLastCalledWith({
       type: 'set-wall-chat-visible',

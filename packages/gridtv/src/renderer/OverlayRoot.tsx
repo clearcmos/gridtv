@@ -11,12 +11,19 @@ import {
   type WallControlCommand,
   type WallFitMode,
 } from 'gridtv-shared'
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { FaEdit, FaPlus, FaVideoSlash } from 'react-icons/fa'
 import { styled } from 'styled-components'
 import { matchesState } from 'xstate'
 import packageInfo from '../../package.json'
 import { computeTwitchChatDockWidth } from '../twitchChat'
+import {
+  createLocalWallShortcutBridge,
+  wallShortcutForInput,
+  type WallShortcut,
+  type WallShortcutBridge,
+  type WallShortcutInput,
+} from '../wallShortcuts'
 import { GridSizeMenu } from './GridSizeMenu'
 import { LAYER_FRAME_SANDBOX } from './layerFrameSandbox'
 import { OverlayViewTile } from './OverlayViewTile'
@@ -25,13 +32,6 @@ import { nextWallAudioMode, WallMediaControls } from './WallMediaControls'
 
 /** Matches familiar video-player UX without making controls feel twitchy. */
 export const WALL_CHROME_IDLE_MS = 2500
-/**
- * Electron can surface one physical keypress through a focused stream view's
- * `before-input-event` and the overlay DOM in quick succession. Treat those
- * cross-source copies as one shortcut while preserving deliberate repeated
- * presses from the same source.
- */
-export const TILE_KEY_DUPLICATE_WINDOW_MS = 100
 
 /** A mixed wall normalizes to Fill first; a uniformly filled wall cycles to Fit. */
 export function nextWallFitModeForViews(
@@ -58,10 +58,7 @@ export function Overlay({
   fullscreenChatVisible = false,
   onControl,
   onSearchTwitch = async () => [],
-  gridMenuShortcut = 0,
-  fitModeShortcut = 0,
-  fullscreenExitShortcut = 0,
-  tileKeyShortcut,
+  shortcutBridge,
 }: Pick<
   StreamwallState,
   | 'config'
@@ -73,10 +70,7 @@ export function Overlay({
 > & {
   onControl: (command: WallControlCommand) => void
   onSearchTwitch?: (query: string) => Promise<TwitchChannelSuggestion[]>
-  gridMenuShortcut?: number
-  fitModeShortcut?: number
-  fullscreenExitShortcut?: number
-  tileKeyShortcut?: { key: string; sequence: number }
+  shortcutBridge?: WallShortcutBridge
 }) {
   const { width, height } = config
   const tileCount = config.tileCount ?? config.cols * config.rows
@@ -109,14 +103,8 @@ export function Overlay({
     targetViewIdx: number | null
   } | null>(null)
   const suppressDoubleClickUntil = useRef(0)
-  const lastFitModeShortcut = useRef(0)
-  const lastFullscreenExitShortcut = useRef(0)
-  const lastTileKeyShortcut = useRef(0)
-  const recentTileKeyExecution = useRef<{
-    key: string
-    source: 'dom' | 'forwarded'
-    at: number
-  }>()
+  const localShortcutBridge = useMemo(createLocalWallShortcutBridge, [])
+  const activeShortcutBridge = shortcutBridge ?? localShortcutBridge
 
   const cycleWallFitMode = useCallback(() => {
     if (fullscreenViewIdx != null) {
@@ -152,24 +140,7 @@ export function Overlay({
   useEffect(() => () => clearChromeIdleTimer(), [])
 
   const runTileKeyShortcut = useCallback(
-    (rawKey: string, source: 'dom' | 'forwarded') => {
-      const key = rawKey.toLowerCase()
-      if (key !== 'f' && key !== 'e' && key !== 'c') {
-        return false
-      }
-
-      const now = Date.now()
-      const recent = recentTileKeyExecution.current
-      if (
-        recent &&
-        recent.key === key &&
-        recent.source !== source &&
-        now - recent.at < TILE_KEY_DUPLICATE_WINDOW_MS
-      ) {
-        return true
-      }
-      recentTileKeyExecution.current = { key, source, at: now }
-
+    (key: 'f' | 'e' | 'c') => {
       if (key === 'c') {
         if (fullscreenViewIdx == null) {
           return false
@@ -222,92 +193,92 @@ export function Overlay({
     ],
   )
 
+  const runShortcut = useCallback(
+    (shortcut: WallShortcut) => {
+      switch (shortcut.type) {
+        case 'toggle-grid-menu':
+          setPickerViewIdx(null)
+          setGridMenuOpen((open) => !open)
+          break
+        case 'cycle-fit-mode':
+          cycleWallFitMode()
+          break
+        case 'exit-fullscreen':
+          if (isGridMenuOpen) {
+            setGridMenuOpen(false)
+          } else if (pickerViewIdx == null && fullscreenViewIdx != null) {
+            onControl({
+              type: 'set-wall-fullscreen',
+              viewIdx: fullscreenViewIdx,
+              fullscreen: false,
+            })
+          }
+          break
+        case 'tile-key':
+          runTileKeyShortcut(shortcut.key)
+          break
+      }
+    },
+    [
+      cycleWallFitMode,
+      fullscreenViewIdx,
+      isGridMenuOpen,
+      onControl,
+      pickerViewIdx,
+      runTileKeyShortcut,
+    ],
+  )
+
+  useEffect(
+    () => activeShortcutBridge.subscribe(runShortcut),
+    [activeShortcutBridge, runShortcut],
+  )
+
   useEffect(() => {
+    const shortcutInput = (
+      event: KeyboardEvent,
+      type: WallShortcutInput['type'],
+    ): WallShortcutInput => ({
+      type,
+      key: event.key,
+      code: event.code,
+      alt: event.altKey,
+      control: event.ctrlKey,
+      meta: event.metaKey,
+      shift: event.shiftKey,
+      isAutoRepeat: event.repeat,
+    })
+    const targetIsEditable = (event: KeyboardEvent) =>
+      event.target instanceof HTMLElement &&
+      (event.target.matches('input, textarea, select') ||
+        event.target.isContentEditable)
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'F1') {
-        event.preventDefault()
-        setPickerViewIdx(null)
-        setGridMenuOpen((open) => !open)
-      } else if (event.key === 'F2' && fullscreenViewIdx == null) {
-        event.preventDefault()
-        cycleWallFitMode()
-      } else if (event.key === 'Escape') {
-        if (isGridMenuOpen) {
-          event.preventDefault()
-          setGridMenuOpen(false)
-        } else if (pickerViewIdx == null && fullscreenViewIdx != null) {
-          event.preventDefault()
-          onControl({
-            type: 'set-wall-fullscreen',
-            viewIdx: fullscreenViewIdx,
-            fullscreen: false,
-          })
-        }
-      } else if (
-        !event.repeat &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !(
-          event.target instanceof HTMLElement &&
-          (event.target.matches('input, textarea, select') ||
-            event.target.isContentEditable)
-        ) &&
-        runTileKeyShortcut(event.key, 'dom')
+      const input = shortcutInput(event, 'keyDown')
+      if (!wallShortcutForInput(input, !targetIsEditable(event))) {
+        return
+      }
+      event.preventDefault()
+      activeShortcutBridge.send(input)
+    }
+    const handleKeyUp = (event: KeyboardEvent) => {
+      const input = shortcutInput(event, 'keyUp')
+      if (
+        wallShortcutForInput(
+          { ...input, type: 'keyDown', isAutoRepeat: false },
+          true,
+        )
       ) {
-        event.preventDefault()
+        activeShortcutBridge.send(input)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    cycleWallFitMode,
-    fullscreenViewIdx,
-    isGridMenuOpen,
-    onControl,
-    pickerViewIdx,
-    runTileKeyShortcut,
-  ])
-
-  useEffect(() => {
-    if (gridMenuShortcut > 0) {
-      setPickerViewIdx(null)
-      setGridMenuOpen((open) => !open)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [gridMenuShortcut])
-
-  useEffect(() => {
-    if (fitModeShortcut > lastFitModeShortcut.current) {
-      lastFitModeShortcut.current = fitModeShortcut
-      cycleWallFitMode()
-    }
-  }, [cycleWallFitMode, fitModeShortcut])
-
-  useEffect(() => {
-    // Consume each forwarded Escape exactly once. Without the sequence guard,
-    // a stale counter re-triggers this effect whenever fullscreenViewIdx
-    // changes, instantly reverting every later fullscreen entry.
-    if (fullscreenExitShortcut > lastFullscreenExitShortcut.current) {
-      lastFullscreenExitShortcut.current = fullscreenExitShortcut
-      if (fullscreenViewIdx != null) {
-        onControl({
-          type: 'set-wall-fullscreen',
-          viewIdx: fullscreenViewIdx,
-          fullscreen: false,
-        })
-      }
-    }
-  }, [fullscreenExitShortcut, fullscreenViewIdx, onControl])
-
-  useEffect(() => {
-    if (
-      tileKeyShortcut &&
-      tileKeyShortcut.sequence > lastTileKeyShortcut.current
-    ) {
-      lastTileKeyShortcut.current = tileKeyShortcut.sequence
-      runTileKeyShortcut(tileKeyShortcut.key, 'forwarded')
-    }
-  }, [runTileKeyShortcut, tileKeyShortcut])
+  }, [activeShortcutBridge])
 
   // Keep error views on the wall (instead of leaving a silent black cell) so the
   // failure and its reason are visible; they are rendered as an error tile below.

@@ -42,6 +42,11 @@ import {
   TWITCH_CHAT_REFERRER,
 } from '../twitchChat'
 import { twitchQualityArgument } from '../twitchPlayer'
+import {
+  parseWallShortcutInput,
+  WallShortcutRouter,
+  type WallShortcutInput,
+} from '../wallShortcuts'
 import { devServerOrigin, loadHTML } from './loadHTML'
 import log from './logger'
 import { secureStreamView } from './navigationSecurity'
@@ -215,6 +220,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
   // fullscreen request is still pending. Only a leave after an acknowledged
   // entry is a real external exit.
   tileNativeFullscreenEntered: boolean
+  private readonly wallShortcutRouter: WallShortcutRouter
 
   constructor(
     config: StreamWindowConfig,
@@ -223,7 +229,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     mediaConfig: StreamMediaConfig = DEFAULT_STREAM_MEDIA_CONFIG,
   ) {
     super()
-    this.config = config
+    // StreamWindow owns its mutable runtime geometry. Published state receives
+    // snapshots through LiveWallSession rather than sharing this reference.
+    this.config = { ...config }
     this.retryConfig = retryConfig
     this.pauseParkedViews = pauseParkedViews
     this.mediaConfig = mediaConfig
@@ -232,6 +240,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     this.viewsByWebContentsId = new Map()
     this.nativeFullscreenBeforeTile = undefined
     this.tileNativeFullscreenEntered = false
+    this.wallShortcutRouter = new WallShortcutRouter()
     this.resizeSyncTimers = []
     this.initialMaximizeTimers = []
     this.chatView = undefined
@@ -278,6 +287,7 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       this.forwardWallKeyboardShortcut(event, input, 'window'),
     )
     win.on('close', (event) => this.emit('close', event))
+    win.on('blur', () => this.wallShortcutRouter.reset())
 
     win.once('ready-to-show', () => {
       log.debug(
@@ -376,11 +386,6 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     })
     loadHTML(overlayView.webContents, 'overlay')
     this.overlayView = overlayView
-    // The overlay renderer handles its own keyboard events. Forwarding the
-    // same event back to it here makes one F, E, or C press run twice. Stream
-    // and background views still need the main-process forwarding path because
-    // they cannot issue trusted wall-control commands themselves.
-
     ipcMain.handle('layer:load', (ev) => {
       if (
         ev.sender !== this.backgroundView.webContents &&
@@ -463,39 +468,48 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
       this.handleWallControl(command.data)
       this.emit('control', command.data)
     })
+    ipcMain.on('wall:shortcut-input', (ev, rawInput: unknown) => {
+      if (ev.sender !== overlayView.webContents) {
+        return
+      }
+      const input = parseWallShortcutInput(rawInput)
+      if (input) {
+        this.forwardWallKeyboardShortcut(undefined, input, 'overlay')
+      }
+    })
   }
 
   private forwardWallKeyboardShortcut(
-    event: ElectronEvent,
-    input: Input,
-    source: 'window' | 'background' | 'stream' | 'chat',
+    event: ElectronEvent | undefined,
+    input: Input | WallShortcutInput,
+    source: 'window' | 'background' | 'stream' | 'chat' | 'overlay',
     includeTileKeys = true,
   ) {
-    if (input.type !== 'keyDown' || input.isAutoRepeat) {
+    if (input.type !== 'keyDown' && input.type !== 'keyUp') {
       return
     }
-    if (input.key === 'F1') {
-      event.preventDefault()
-      this.overlayView?.webContents.send('wall:grid-menu-shortcut')
-    } else if (input.key === 'F2') {
-      event.preventDefault()
-      this.overlayView?.webContents.send('wall:fit-mode-shortcut')
-    } else if (input.key === 'Escape') {
-      event.preventDefault()
-      this.overlayView?.webContents.send('wall:fullscreen-exit-shortcut')
-    } else if (
-      includeTileKeys &&
-      !input.alt &&
-      !input.control &&
-      !input.meta &&
-      ['f', 'e', 'c'].includes(input.key.toLowerCase())
-    ) {
-      log.debug('Fullscreen diagnostic: forwarding tile key', {
+    const result = this.wallShortcutRouter.route(
+      {
+        type: input.type,
         key: input.key,
+        code: input.code,
+        alt: input.alt,
+        control: input.control,
+        meta: input.meta,
+        shift: input.shift,
+        isAutoRepeat: input.isAutoRepeat,
+      },
+      includeTileKeys,
+    )
+    if (result.handled) {
+      event?.preventDefault()
+    }
+    if (result.shortcut) {
+      log.debug('Forwarding wall shortcut', {
+        shortcut: result.shortcut,
         source,
       })
-      event.preventDefault()
-      this.overlayView?.webContents.send('wall:tile-key-shortcut', input.key)
+      this.overlayView?.webContents.send('wall:shortcut', result.shortcut)
     }
   }
 
@@ -917,15 +931,9 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
 
   /**
    * Reconfigures the grid dimensions at runtime. The actual re-layout happens on
-   * the next `setViews()` call (driven by the server after it remaps the views
-   * state), which reads `cols`/`rows` from `this.config`.
-   *
-   * Mutates `this.config` in place rather than replacing it: the main process
-   * shares a single config object across `streamWindow.config`,
-   * `clientState.config` and the resize pipeline (`handleResize` likewise
-   * mutates it in place). Replacing the object would detach those references and
-   * leave the overlay/control grid drawing stale dimensions after the next
-   * resize.
+   * next `setViews()` call, which reads `cols`/`rows` from the owned runtime
+   * config. LiveWallSession publishes a copied config snapshot after the
+   * transition completes.
    */
   setGridSize(cols: number, rows: number) {
     this.config.cols = cols

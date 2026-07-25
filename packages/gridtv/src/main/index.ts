@@ -6,11 +6,8 @@ import {
   ControlCommand,
   DataSourceType,
   StreamwallState,
-  WallControlCommand,
-  fullscreenViewContentMap,
   isSocketOpen,
   parseControlEndpoint,
-  twitchChannelUrl,
   twitchLoginFromInput,
   type TwitchLiveStatus,
 } from 'gridtv-shared'
@@ -23,7 +20,6 @@ import 'source-map-support/register'
 import { updateElectronApp } from 'update-electron-app'
 import WebSocket from 'ws'
 import yargs from 'yargs'
-import * as Y from 'yjs'
 import {
   DEFAULT_STREAM_MEDIA_CONFIG,
   STREAM_SESSION_MODES,
@@ -44,11 +40,7 @@ import {
 } from './config'
 import { resolveConfigInitError } from './configInitError'
 import { decideControlEndpointConnection } from './controlEndpointConnection'
-import {
-  addStableCustomStreamIds,
-  migrateLegacyCustomAssignments,
-  stableCustomStreamId,
-} from './customStreamIdentity'
+import { addStableCustomStreamIds } from './customStreamIdentity'
 import {
   LocalStreamData,
   OVERLAY_DATA_SOURCE_NAME,
@@ -61,26 +53,11 @@ import {
 } from './data'
 import { DataSourceHealthTracker } from './dataSourceHealth'
 import { addFavorite, removeFavorite } from './favorites'
-import {
-  addLayoutPreset,
-  applyLayoutPreset,
-  buildLayoutPreset,
-} from './layoutPresets'
-import {
-  canLoadLiveWallStream,
-  twitchStatusForStream,
-} from './liveWallAvailability'
-import {
-  applyLiveTileCount,
-  resizeLiveWallAssignment,
-  swapLiveWallAssignments,
-} from './liveWallResize'
+import { addLayoutPreset } from './layoutPresets'
+import { LiveWallSession } from './liveWallSession'
 import {
   LIVE_WALL_FIT_MODE_VERSION,
-  applyDefaultFitModesForLayout,
   normalizeLiveWallState,
-  remapLiveWallTileSettings,
-  updateLiveWallTileSettings,
 } from './liveWallState'
 import { devServerOrigin } from './loadHTML'
 import log, {
@@ -105,7 +82,6 @@ import {
 import { checkUplinkCommandGate } from './uplinkCommandGate'
 import { UPLINK_ORIGIN, shouldForwardUpdateToUplink } from './uplinkEcho'
 import { routeUplinkWsMessage } from './uplinkMessageRouting'
-import { initializeViewsState } from './viewsStateInit'
 import {
   shouldHideInsteadOfQuit,
   shouldQuitOnAllWindowsClosed,
@@ -611,7 +587,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     identity: {
       role: 'local',
     },
-    config: streamWindowConfig,
+    config: { ...streamWindow.config },
     streams: [],
     customStreams: [],
     views: [],
@@ -623,135 +599,49 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     favorites: db.data.favorites,
     dataSourceHealth: [],
   }
-
-  function clearLiveWallFullscreen() {
-    streamWindow.setFullscreenChat(undefined, false)
-    streamWindow.setTileNativeFullscreen(false)
-    clientState = {
-      ...clientState,
-      fullscreenViewIdx: null,
-      fullscreenChatVisible: false,
-    }
-  }
-
-  function updateViewsFromStateDoc() {
-    try {
-      // When a view is expanded to fullscreen (issue #362), override the
-      // derived layout so the expanded stream fills every grid cell -- one
-      // wall-spanning box, with the other views parked (hidden but kept
-      // alive, not torn down) behind it, so a later collapse can reposition
-      // them instead of reloading them from scratch (issue #369). This
-      // override is transient: it reads the expanded stream from
-      // `viewsState` but never writes back, so the persisted grid
-      // assignments are untouched and a later collapse restores the normal
-      // layout verbatim.
-      const { fullscreenViewIdx } = clientState
-      if (fullscreenViewIdx != null) {
-        const streamId = viewsState
-          .get(String(fullscreenViewIdx))
-          ?.get('streamId')
-        const stream = clientState.streams.find((s) => s._id === streamId)
-        if (stream && canLoadLiveWallStream(stream, twitchLiveStatuses)) {
-          streamWindow.setViews(
-            fullscreenViewContentMap(streamWindowConfig.tileCount ?? 1, 1, {
-              url: stream.link,
-              kind: stream.kind || 'video',
-            }),
-            clientState.streams,
-            { parkUnused: true, fillWall: true },
-          )
-          return
-        }
-        // The expanded stream is gone (its cell was cleared or it dropped out
-        // of the data source): fall back to the normal layout and clear the
-        // stale override so clients stop rendering a phantom expansion. The
-        // setViews() below emits a state update that broadcasts the cleared
-        // value.
-        clearLiveWallFullscreen()
-      }
-      const viewContentMap = new Map()
-      for (const [key, viewData] of viewsState) {
-        const streamId = viewData.get('streamId')
-        const stream = clientState.streams.find((s) => s._id === streamId)
-        if (!stream || !canLoadLiveWallStream(stream, twitchLiveStatuses)) {
-          continue
-        }
-        viewContentMap.set(key, {
-          url: stream.link,
-          kind: stream.kind || 'video',
-        })
-      }
-      streamWindow.setViews(viewContentMap, clientState.streams)
-      for (let idx = 0; idx < liveWallState.tileCount; idx++) {
-        const settings = liveWallState.tiles[String(idx)]
-        if (settings) {
-          streamWindow.applyWallTileSettings(idx, settings)
-        }
-      }
-    } catch (err) {
-      log.error('Error updating views', err)
-    }
-  }
-
-  const stateDoc = new Y.Doc()
-  const viewsState = stateDoc.getMap<Y.Map<string | undefined>>('views')
-
-  function buildLiveWallSlots(): NonNullable<StreamwallState['wallSlots']> {
-    return Array.from({ length: liveWallState.tileCount }, (_, viewIdx) => {
-      const streamId = viewsState.get(String(viewIdx))?.get('streamId')
-      const stream = streamId
-        ? clientState.streams.find((candidate) => candidate._id === streamId)
-        : undefined
-      return {
-        viewIdx,
-        streamId,
-        twitchStatus: stream
-          ? twitchStatusForStream(stream, twitchLiveStatuses)
-          : undefined,
-      }
-    })
-  }
+  const stateEmitter = new EventEmitter<{ state: [StreamwallState] }>()
 
   if (db.data.stateDoc) {
     log.info('Loading stateDoc from storage...')
-    try {
-      Y.applyUpdate(stateDoc, Buffer.from(db.data.stateDoc, 'base64'))
-    } catch (err) {
-      log.warn('Failed to restore stateDoc', err)
-    }
   }
 
-  const persistStateDoc = throttle(() => {
-    safeUpdate(db, (data) => {
-      const fullDoc = Y.encodeStateAsUpdate(stateDoc)
-      data.stateDoc = Buffer.from(fullDoc).toString('base64')
+  const persistStateDoc = throttle((encodedStateDoc: string) => {
+    void safeUpdate(db, (data) => {
+      data.stateDoc = encodedStateDoc
     })
   }, 1000)
-  stateDoc.on('update', persistStateDoc)
-
-  const persistLiveWall = throttle(() => {
+  const persistLiveWall = throttle((state: typeof liveWallState) => {
     void safeUpdate(db, (data) => {
-      data.liveWall = liveWallState
+      data.liveWall = state
     })
   }, 250)
 
-  initializeViewsState(
-    { viewsState, transact: (fn) => stateDoc.transact(fn) },
-    liveWallState.tileCount,
-    1,
-  )
-
-  if (needsFitModeDefaultsMigration) {
-    const assignments = Array.from(
-      { length: liveWallState.tileCount },
-      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-    )
-    applyDefaultFitModesForLayout(liveWallState, assignments)
-    persistLiveWall()
-  }
-
-  updateViewsFromStateDoc()
-  viewsState.observeDeep(updateViewsFromStateDoc)
+  const liveWallSession = new LiveWallSession({
+    storedState: liveWallState,
+    encodedStateDoc: db.data.stateDoc,
+    needsFitModeDefaultsMigration,
+    window: streamWindow,
+    twitchStatuses: twitchLiveStatuses,
+    getStreams: () => clientState.streams,
+    getKnownStreamIds: () =>
+      new Set([
+        ...clientState.streams.map((stream) => stream._id),
+        ...[...localStreamData.dataByURL.values()]
+          .map((stream) => stream._id)
+          .filter((id): id is string => typeof id === 'string'),
+      ]),
+    addLocalStream: (url, data) => localStreamData.update(url, data),
+    onTwitchAssignment: (login) => {
+      if (!twitchLiveStatuses.has(login)) {
+        twitchLiveStatuses.set(login, 'checking')
+      }
+      void refreshTwitchStatuses([login])
+    },
+    persistStateDoc,
+    persistStoredState: persistLiveWall,
+    publish: (state) => updateState(state),
+  })
+  liveWallSession.start()
 
   // Cycles any configured views through their playlist of stream URLs,
   // independent of whatever data source populated `clientState.streams`.
@@ -761,11 +651,8 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         clientState.streams.byURL?.get(url) ??
         clientState.streams.find((s) => s.link === url)
       )?._id,
-    setViewStream: (view, streamId) => {
-      stateDoc.transact(() => {
-        viewsState.get(String(view))?.set('streamId', streamId)
-      })
-    },
+    setViewStream: (view, streamId) =>
+      liveWallSession.setPlaylistStream(view, streamId),
   })
   playlistScheduler.start()
 
@@ -808,7 +695,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
         }
       }
       updateState({})
-      updateViewsFromStateDoc()
+      liveWallSession.relayoutAndPublish()
     }
     const queued = twitchStatusRefreshQueue.then(refresh, refresh)
     twitchStatusRefreshQueue = queued
@@ -816,371 +703,18 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   }
 
   function refreshAssignedTwitchStatuses() {
-    const logins: string[] = []
-    for (const cell of viewsState.values()) {
-      const streamId = cell.get('streamId')
-      const stream = clientState.streams.find(
-        (candidate) => candidate._id === streamId,
-      )
-      const login = stream ? twitchLoginFromInput(stream.link) : null
-      if (login) {
-        logins.push(login)
-      }
-    }
-    return refreshTwitchStatuses(logins)
+    return refreshTwitchStatuses(liveWallSession.getAssignedTwitchLogins())
   }
 
-  function setLiveTileCount(count: number) {
-    clearLiveWallFullscreen()
-    const previousAssignments = Array.from(
-      { length: liveWallState.tileCount },
-      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-    )
-    const result = applyLiveTileCount(
-      {
-        viewsState,
-        transact: (fn) => stateDoc.transact(fn),
-        setTileCount: (nextCount) => {
-          // Publish the new count before the Yjs transaction notifies its
-          // synchronous observers. Keep the old settings entries intact until
-          // remapLiveWallTileSettings below has attached them to retained IDs.
-          liveWallState.tileCount = nextCount
-          streamWindow.setTileCount(nextCount)
-        },
-        knownStreamIds: new Set([
-          ...clientState.streams.map((stream) => stream._id),
-          ...[...localStreamData.dataByURL.values()]
-            .map((stream) => stream._id)
-            .filter((id): id is string => typeof id === 'string'),
-        ]),
-      },
-      count,
-    )
-    const nextAssignments = Array.from({ length: result.count }, (_, idx) =>
-      viewsState.get(String(idx))?.get('streamId'),
-    )
-    remapLiveWallTileSettings(
-      liveWallState,
-      previousAssignments,
-      nextAssignments,
-    )
-    persistLiveWall()
-    updateViewsFromStateDoc()
-    updateState({})
-  }
-
-  function setLiveWallStream(viewIdx: number, input: string) {
-    if (viewIdx < 0 || viewIdx >= liveWallState.tileCount) {
-      return
-    }
-    const cell = viewsState.get(String(viewIdx))
-    if (!cell) {
-      return
-    }
-    const previousAssignments = Array.from(
-      { length: liveWallState.tileCount },
-      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-    )
-    const replacedStreamId = cell.get('streamId')
-    const replacedSpaces = replacedStreamId
-      ? previousAssignments.flatMap((streamId, idx) =>
-          streamId === replacedStreamId ? [idx] : [],
-        )
-      : [viewIdx]
-
-    if (!input.trim()) {
-      stateDoc.transact(() => {
-        for (const idx of replacedSpaces) {
-          viewsState.get(String(idx))?.set('streamId', undefined)
-        }
-      })
-      const nextAssignments = Array.from(
-        { length: liveWallState.tileCount },
-        (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-      )
-      remapLiveWallTileSettings(
-        liveWallState,
-        previousAssignments,
-        nextAssignments,
-      )
-      persistLiveWall()
-      updateViewsFromStateDoc()
-      return
-    }
-
-    const login = twitchLoginFromInput(input)
-    if (!login) {
-      log.warn('Ignoring invalid Twitch channel input:', input)
-      return
-    }
-    if (!twitchLiveStatuses.has(login)) {
-      twitchLiveStatuses.set(login, 'checking')
-    }
-    const url = twitchChannelUrl(login)
-    const existing =
-      clientState.streams.byURL?.get(url) ??
-      clientState.streams.find((stream) => stream.link === url)
-    const streamId = existing?._id ?? stableCustomStreamId(url)
-    if (!existing) {
-      localStreamData.update(url, {
-        link: url,
-        kind: 'video',
-        label: login,
-        _id: streamId,
-      })
-    }
-    stateDoc.transact(() => {
-      // A stream can own multiple cells only as one contiguous stretched tile.
-      // Clear any former occurrence before assigning it to the region being
-      // replaced, so typing the same username elsewhere moves rather than
-      // accidentally creating an overlapping/non-contiguous span.
-      for (let idx = 0; idx < liveWallState.tileCount; idx++) {
-        if (viewsState.get(String(idx))?.get('streamId') === streamId) {
-          viewsState.get(String(idx))?.set('streamId', undefined)
-        }
-      }
-      for (const idx of replacedSpaces) {
-        viewsState.get(String(idx))?.set('streamId', streamId)
-      }
-    })
-    const nextAssignments = Array.from(
-      { length: liveWallState.tileCount },
-      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-    )
-    remapLiveWallTileSettings(
-      liveWallState,
-      previousAssignments,
-      nextAssignments,
-    )
-    persistLiveWall()
-    updateViewsFromStateDoc()
-    void refreshTwitchStatuses([login])
-  }
-
-  function setLiveWallFullscreen(viewIdx: number, fullscreen: boolean) {
-    log.debug('Fullscreen diagnostic: wall fullscreen command', {
-      viewIdx,
-      fullscreen,
-      currentFullscreenViewIdx: clientState.fullscreenViewIdx,
-      nativeWindowFullscreen: streamWindow.win.isFullScreen(),
-    })
-    if (viewIdx < 0 || viewIdx >= liveWallState.tileCount) {
-      log.debug('Fullscreen diagnostic: rejected out-of-range tile', {
-        viewIdx,
-        tileCount: liveWallState.tileCount,
-      })
-      return
-    }
-    if (fullscreen && !viewsState.get(String(viewIdx))?.get('streamId')) {
-      log.debug('Fullscreen diagnostic: rejected unassigned tile', { viewIdx })
-      return
-    }
-    if (fullscreen) {
-      streamWindow.setFullscreenChat(undefined, false)
-      streamWindow.setTileNativeFullscreen(true)
-      updateState({
-        fullscreenViewIdx: viewIdx,
-        fullscreenChatVisible: false,
-      })
-    } else {
-      clearLiveWallFullscreen()
-      updateState({})
-    }
-    updateViewsFromStateDoc()
-    log.debug('Fullscreen diagnostic: command applied', {
-      fullscreenViewIdx: clientState.fullscreenViewIdx,
-      nativeWindowFullscreen: streamWindow.win.isFullScreen(),
-    })
-  }
-
-  function setLiveWallChatVisible(visible: boolean) {
-    const { fullscreenViewIdx } = clientState
-    const streamId =
-      fullscreenViewIdx == null
-        ? undefined
-        : viewsState.get(String(fullscreenViewIdx))?.get('streamId')
-    const stream = streamId
-      ? clientState.streams.find((candidate) => candidate._id === streamId)
-      : undefined
-    const channel = twitchLoginFromInput(stream?.link ?? '')
-    const nextVisible = visible && fullscreenViewIdx != null && channel != null
-
-    clientState = {
-      ...clientState,
-      fullscreenChatVisible: nextVisible,
-    }
-    streamWindow.setFullscreenChat(channel ?? undefined, nextVisible)
-    updateViewsFromStateDoc()
-    updateState({})
-  }
-
-  function swapLiveWallStreams(fromViewIdx: number, toViewIdx: number) {
-    if (
-      fromViewIdx === toViewIdx ||
-      fromViewIdx < 0 ||
-      toViewIdx < 0 ||
-      fromViewIdx >= liveWallState.tileCount ||
-      toViewIdx >= liveWallState.tileCount
-    ) {
-      return
-    }
-    if (
-      !viewsState.has(String(fromViewIdx)) ||
-      !viewsState.has(String(toViewIdx))
-    ) {
-      return
-    }
-    clearLiveWallFullscreen()
-    const previousAssignments = Array.from(
-      { length: liveWallState.tileCount },
-      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-    )
-    if (
-      !swapLiveWallAssignments(
-        { viewsState, transact: (fn) => stateDoc.transact(fn) },
-        fromViewIdx,
-        toViewIdx,
-      )
-    ) {
-      return
-    }
-    const nextAssignments = Array.from(
-      { length: liveWallState.tileCount },
-      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-    )
-    remapLiveWallTileSettings(
-      liveWallState,
-      previousAssignments,
-      nextAssignments,
-    )
-    persistLiveWall()
-    updateViewsFromStateDoc()
-    updateState({})
-  }
-
-  function resizeLiveWallTile(viewIdx: number, targetViewIdx: number) {
-    const previousAssignments = Array.from(
-      { length: liveWallState.tileCount },
-      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-    )
-    const result = resizeLiveWallAssignment(
-      { viewsState, transact: (fn) => stateDoc.transact(fn) },
-      liveWallState.tileCount,
-      viewIdx,
-      targetViewIdx,
-    )
-    if (!result.resized) {
-      return
-    }
-    clearLiveWallFullscreen()
-    const nextAssignments = Array.from(
-      { length: liveWallState.tileCount },
-      (_, idx) => viewsState.get(String(idx))?.get('streamId'),
-    )
-    remapLiveWallTileSettings(
-      liveWallState,
-      previousAssignments,
-      nextAssignments,
-    )
-    const resizedStreamId = previousAssignments[viewIdx]
-    if (resizedStreamId) {
-      applyDefaultFitModesForLayout(
-        liveWallState,
-        nextAssignments,
-        resizedStreamId,
-      )
-    }
-    persistLiveWall()
-    updateViewsFromStateDoc()
-    updateState({})
-    if (result.discardedStreamIds.length > 0) {
-      log.info(
-        'Discarded streams that no longer fit after tile resize:',
-        result.discardedStreamIds,
-      )
-    }
-  }
-
-  function persistWallMediaCommand(command: WallControlCommand) {
-    const updateRegionSettings = (
-      viewIdx: number,
-      patch: Parameters<typeof updateLiveWallTileSettings>[2],
-    ) => {
-      const streamId = viewsState.get(String(viewIdx))?.get('streamId')
-      for (let idx = 0; idx < liveWallState.tileCount; idx++) {
-        if (
-          idx === viewIdx ||
-          (streamId != null &&
-            viewsState.get(String(idx))?.get('streamId') === streamId)
-        ) {
-          updateLiveWallTileSettings(liveWallState, idx, patch)
-        }
-      }
-    }
-
-    switch (command.type) {
-      case 'set-wall-playback':
-        updateRegionSettings(command.viewIdx, {
-          paused: command.paused,
-        })
-        persistLiveWall()
-        break
-      case 'set-wall-volume':
-        updateRegionSettings(command.viewIdx, {
-          volume: command.volume,
-        })
-        persistLiveWall()
-        break
-      case 'set-wall-audio-mode':
-        updateRegionSettings(command.viewIdx, {
-          audioMode: command.mode,
-        })
-        persistLiveWall()
-        break
-      case 'set-wall-fit-mode':
-        updateRegionSettings(command.viewIdx, {
-          fitMode: command.mode,
-        })
-        persistLiveWall()
-        break
-      case 'set-wall-fit-mode-all':
-        for (let idx = 0; idx < liveWallState.tileCount; idx++) {
-          updateLiveWallTileSettings(liveWallState, idx, {
-            fitMode: command.mode,
-          })
-        }
-        persistLiveWall()
-        break
-      case 'set-wall-tile-count':
-        setLiveTileCount(command.count)
-        break
-      case 'set-wall-stream':
-        setLiveWallStream(command.viewIdx, command.username)
-        break
-      case 'set-wall-fullscreen':
-        setLiveWallFullscreen(command.viewIdx, command.fullscreen)
-        break
-      case 'set-wall-chat-visible':
-        setLiveWallChatVisible(command.visible)
-        break
-      case 'swap-wall-streams':
-        swapLiveWallStreams(command.fromViewIdx, command.toViewIdx)
-        break
-      case 'resize-wall-tile':
-        resizeLiveWallTile(command.viewIdx, command.targetViewIdx)
-        break
-    }
-  }
-
-  streamWindow.on('control', persistWallMediaCommand)
+  streamWindow.on('control', (command) => liveWallSession.dispatch(command))
   streamWindow.on('tileFullscreenExited', () => {
-    const { fullscreenViewIdx } = clientState
+    const { fullscreenViewIdx } = liveWallSession.projection
     log.debug('Fullscreen diagnostic: external native exit reported', {
       fullscreenViewIdx,
       nativeWindowFullscreen: streamWindow.win.isFullScreen(),
     })
     if (fullscreenViewIdx != null) {
-      setLiveWallFullscreen(fullscreenViewIdx, false)
+      liveWallSession.setFullscreen(fullscreenViewIdx, false)
     }
   })
 
@@ -1250,7 +784,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       streamWindow.reloadView(msg.viewIdx)
     } else if (msg.type === 'set-view-fullscreen') {
       log.debug('Setting view fullscreen:', msg.viewIdx, msg.fullscreen)
-      setLiveWallFullscreen(msg.viewIdx, msg.fullscreen)
+      liveWallSession.setFullscreen(msg.viewIdx, msg.fullscreen)
     } else if (msg.type === 'browse' || msg.type === 'dev-tools') {
       if (browseWindow && !browseWindow.isDestroyed()) {
         // DevTools needs a fresh webContents to work. Close any existing window.
@@ -1303,18 +837,10 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     } else if (msg.type === 'set-grid-size') {
       // Compatibility for remote controllers: collapse their rectangular
       // request into this branch's exact 1-9 live-wall capacity.
-      setLiveTileCount(Math.min(9, msg.cols * msg.rows))
+      liveWallSession.setTileCount(Math.min(9, msg.cols * msg.rows))
     } else if (msg.type === 'save-layout-preset') {
       log.debug('Saving layout preset:', msg.name)
-      const preset = buildLayoutPreset(
-        {
-          viewsState,
-          cols: streamWindowConfig.cols,
-          rows: streamWindowConfig.rows,
-        },
-        randomUUID(),
-        msg.name,
-      )
+      const preset = liveWallSession.buildLayoutPreset(randomUUID(), msg.name)
       const layoutPresets = addLayoutPreset(clientState.layoutPresets, preset)
       safeUpdate(db, (data) => {
         data.layoutPresets = layoutPresets
@@ -1326,17 +852,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       )
       if (preset) {
         log.debug('Loading layout preset:', preset.name)
-        applyLayoutPreset(
-          {
-            viewsState,
-            transact: (fn) => stateDoc.transact(fn),
-            setGridSize: (cols, rows) => streamWindow.setGridSize(cols, rows),
-          },
-          preset,
-        )
-        // See the set-grid-size branch above: broadcast the shared config
-        // object via updateState({}) rather than detaching a copy.
-        updateState({})
+        liveWallSession.applyLayoutPreset(preset)
       }
     } else if (msg.type === 'delete-layout-preset') {
       log.debug('Deleting layout preset:', msg.presetId)
@@ -1368,11 +884,12 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     }
   }
 
-  const stateEmitter = new EventEmitter<{ state: [StreamwallState] }>()
-
   function updateState(newState: Partial<StreamwallState>) {
-    clientState = { ...clientState, ...newState }
-    clientState = { ...clientState, wallSlots: buildLiveWallSlots() }
+    clientState = {
+      ...clientState,
+      ...newState,
+      ...liveWallSession?.projection,
+    }
     streamWindow.onState(clientState)
     stateEmitter.emit('state', clientState)
   }
@@ -1387,8 +904,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   // StreamWindow resized -> re-layout stream views and rebroadcast state so the
   // overlay grid matches the new window dimensions.
   streamWindow.on('resize', () => {
-    updateViewsFromStateDoc()
-    updateState({})
+    liveWallSession.relayoutAndPublish()
   })
 
   // StreamWindow <- main init state
@@ -1485,7 +1001,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
     ws.addEventListener('open', () => {
       log.debug('Control WebSocket connected.')
       ws.send(JSON.stringify({ type: 'state', state: clientState }))
-      ws.send(Y.encodeStateAsUpdate(stateDoc))
+      ws.send(liveWallSession.encodeAssignments())
     })
     ws.addEventListener('close', () => {
       log.debug('Control WebSocket disconnected.')
@@ -1494,7 +1010,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       const route = routeUplinkWsMessage(ev.data)
       switch (route.kind) {
         case 'yjs-update':
-          Y.applyUpdate(stateDoc, route.update, UPLINK_ORIGIN)
+          liveWallSession.applyAssignmentUpdate(route.update, UPLINK_ORIGIN)
           return
         case 'parse-error':
           log.warn('Failed to parse control WebSocket message:', route.error)
@@ -1515,7 +1031,7 @@ async function main(argv: ReturnType<typeof parseArgs>) {
       }
       ws.send(JSON.stringify({ type: 'state', state: clientState }))
     })
-    stateDoc.on('update', (update, origin) => {
+    liveWallSession.onAssignmentUpdate((update, origin) => {
       if (!shouldForwardUpdateToUplink(origin) || !isSocketOpen(ws)) {
         return
       }
@@ -1600,18 +1116,16 @@ async function main(argv: ReturnType<typeof parseArgs>) {
   for await (const streams of combineDataSources(dataSources, idGen)) {
     updateState({ streams })
     if (legacyWallMigrationPending) {
-      migrateLegacyCustomAssignments({
-        viewsState,
-        transact: (fn) => stateDoc.transact(fn),
-        customEntries: originalCustomStreamData,
-        knownStreamIds: new Set(streams.map((stream) => stream._id)),
-      })
+      liveWallSession.migrateLegacyAssignments(
+        originalCustomStreamData,
+        new Set(streams.map((stream) => stream._id)),
+      )
       legacyWallMigrationPending = false
     }
     // Stored Twitch assignments are status-gated on every launch: no player
     // WebContents is created until Twitch confirms that channel is live.
     await refreshAssignedTwitchStatuses()
-    updateViewsFromStateDoc()
+    liveWallSession.relayoutAndPublish()
     // Newly-loaded stream data may resolve a playlist URL that failed to
     // resolve on startup or a prior interval tick; fill it in immediately
     // rather than leaving the view empty until the next tick.

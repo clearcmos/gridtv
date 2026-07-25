@@ -3,6 +3,7 @@ import { render } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { StreamwallLayerGlobal } from '../preload/layerPreload'
+import type { WallShortcutBridge } from '../wallShortcuts'
 import { initRendererSentry } from './initSentry'
 import { Overlay } from './OverlayRoot'
 
@@ -17,56 +18,19 @@ declare global {
 
 initRendererSentry()
 
+const shortcutBridge: WallShortcutBridge = {
+  send: (input) => window.streamwallLayer.sendShortcutInput(input),
+  subscribe: (handler) => window.streamwallLayer.onShortcut(handler),
+}
+
 function App() {
   const [state, setState] = useState<StreamwallState | undefined>()
-  const [gridMenuShortcut, setGridMenuShortcut] = useState(0)
-  const [fitModeShortcut, setFitModeShortcut] = useState(0)
-  const [fullscreenExitShortcut, setFullscreenExitShortcut] = useState(0)
-  const [tileKeyShortcut, setTileKeyShortcut] = useState<{
-    key: string
-    sequence: number
-  }>()
 
   useEffect(() => {
     const unsubscribe = window.streamwallLayer.onState(setState)
     window.streamwallLayer.load()
     return unsubscribe
   }, [])
-
-  useEffect(
-    () =>
-      window.streamwallLayer.onGridMenuShortcut(() =>
-        setGridMenuShortcut((value) => value + 1),
-      ),
-    [],
-  )
-
-  useEffect(
-    () =>
-      window.streamwallLayer.onTileKeyShortcut((key) =>
-        setTileKeyShortcut((current) => ({
-          key,
-          sequence: (current?.sequence ?? 0) + 1,
-        })),
-      ),
-    [],
-  )
-
-  useEffect(
-    () =>
-      window.streamwallLayer.onFitModeShortcut(() =>
-        setFitModeShortcut((value) => value + 1),
-      ),
-    [],
-  )
-
-  useEffect(
-    () =>
-      window.streamwallLayer.onFullscreenExitShortcut(() =>
-        setFullscreenExitShortcut((value) => value + 1),
-      ),
-    [],
-  )
 
   useHotkeys('ctrl+shift+i', () => {
     window.streamwallLayer.openDevTools()
@@ -94,10 +58,7 @@ function App() {
       fullscreenChatVisible={fullscreenChatVisible}
       onControl={window.streamwallLayer.control}
       onSearchTwitch={window.streamwallLayer.searchTwitch}
-      gridMenuShortcut={gridMenuShortcut}
-      fitModeShortcut={fitModeShortcut}
-      fullscreenExitShortcut={fullscreenExitShortcut}
-      tileKeyShortcut={tileKeyShortcut}
+      shortcutBridge={shortcutBridge}
     />
   )
 }

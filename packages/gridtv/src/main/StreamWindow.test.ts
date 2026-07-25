@@ -79,16 +79,14 @@ describe('StreamWindow.setGridSize', () => {
     expect(sw.config.rows).toBe(4)
   })
 
-  it('mutates the shared config object in place instead of replacing it', () => {
+  it('keeps the owned config identity stable for the resize pipeline', () => {
     const config = makeConfig()
     const sw = makeStreamWindow(config)
 
     sw.setGridSize(5, 4)
 
-    // The config reference must be preserved: the main process shares one
-    // config object across streamWindow.config, clientState.config and the
-    // resize pipeline. Replacing it detaches those references and desyncs the
-    // overlay/control grid from the wall on the next resize (issue #14).
+    // Internal layout and resize work can retain this object while published
+    // client state receives copied snapshots from LiveWallSession.
     expect(sw.config).toBe(config)
     expect(config.cols).toBe(5)
     expect(config.rows).toBe(4)
