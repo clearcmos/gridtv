@@ -92,7 +92,7 @@ describe('OverlayViewTile', () => {
     // stream; the platform/name badge must not cover the video.
     const svgs = tile.querySelectorAll('svg')
     expect(svgs).toHaveLength(1)
-    expect(svgs[0].querySelector('circle')).not.toBeNull()
+    expect(svgs[0]!.querySelector('circle')).not.toBeNull()
   })
 
   test('shows the loading spinner while isLoading is true', () => {

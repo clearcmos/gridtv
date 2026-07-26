@@ -1,5 +1,7 @@
 import {
   fullscreenViewContentMap,
+  type StreamData,
+  type StreamList,
   type StreamWindowConfig,
   type ViewContent,
   type ViewContentMap,
@@ -44,6 +46,17 @@ function makeConfig(
     backgroundColor: '#000',
     ...overrides,
   }
+}
+
+function makeStreams(...contents: ViewContent[]): StreamList {
+  const streams = contents.map((content, idx): StreamData => ({
+    _id: `stream-${idx}`,
+    _dataSource: 'test',
+    kind: content.kind,
+    link: content.url,
+  })) as StreamList
+  streams.byURL = new Map(streams.map((stream) => [stream.link, stream]))
+  return streams
 }
 
 /**
@@ -220,6 +233,17 @@ describe('StreamWindow maximize/Wayland resize synchronization', () => {
   it('falls back to the position-matched work area when no monitor is wide enough', () => {
     const fallback = { x: 0, y: 0, width: 1707, height: 914 }
     expect(selectMaximizedWorkArea([1707, 932], [], fallback)).toBe(fallback)
+  })
+
+  it('ignores an incomplete Electron content-size tuple', () => {
+    const sw = makeStreamWindow(makeConfig())
+    sw.win = {
+      isDestroyed: () => false,
+      getContentSize: () => [],
+    } as unknown as InstanceType<typeof StreamWindow>['win']
+
+    expect(() => sw.handleResize()).not.toThrow()
+    expect(sw.config).toMatchObject({ width: 1920, height: 1080 })
   })
 
   it('lays out a maximized wall above the reserved KDE panel', () => {
@@ -715,7 +739,7 @@ describe('StreamWindow.setViews', () => {
     const viewContentMap: ViewContentMap = new Map([
       ['0', { url: 'https://example.com/missing', kind: 'video' }],
     ])
-    const streams = { byURL: new Map() }
+    const streams = makeStreams()
 
     sw.setViews(viewContentMap, streams)
 
@@ -738,7 +762,7 @@ describe('StreamWindow.setViews', () => {
     const viewContentMap: ViewContentMap = new Map([
       ['0', { url: 'https://example.com/missing', kind: 'video' }],
     ])
-    const streams = { byURL: new Map() }
+    const streams = makeStreams()
 
     sw.setViews(viewContentMap, streams)
 
@@ -834,7 +858,7 @@ describe('StreamWindow.setViews reusing an actor across a genuine content change
     // currently displaying -- a genuine content change, e.g. a playlist
     // advance or a drag-to-place reassignment.
     const viewContentMap: ViewContentMap = new Map([['0', streamB]])
-    const streams = { byURL: new Map([[streamB.url, {}]]) }
+    const streams = makeStreams(streamB)
 
     sw.setViews(viewContentMap, streams)
 
@@ -876,7 +900,7 @@ describe('StreamWindow.setViews reusing an actor across a genuine content change
     sw.createView = vi.fn(() => newActor)
 
     const viewContentMap: ViewContentMap = new Map([['0', streamB]])
-    const streams = { byURL: new Map([[streamB.url, {}]]) }
+    const streams = makeStreams(streamB)
 
     sw.setViews(viewContentMap, streams)
 
@@ -947,13 +971,7 @@ describe('StreamWindow.setViews reusing an actor across a genuine content change
       ['1', streamE], // unrelated new content -> no existing actor fits
       ['2', streamB], // same content as `moved`, elsewhere -> should reuse moved
     ])
-    const streams = {
-      byURL: new Map([
-        [streamB.url, {}],
-        [streamC.url, {}],
-        [streamE.url, {}],
-      ]),
-    }
+    const streams = makeStreams(streamB, streamC, streamE)
 
     sw.setViews(viewContentMap, streams)
 
@@ -1015,9 +1033,7 @@ describe('StreamWindow.setViews expanding a view to fill the wall (issue #362)',
     sw.createView = vi.fn()
 
     // The fullscreen override fills every cell with streamB.
-    sw.setViews(fullscreenViewContentMap(2, 2, streamB), {
-      byURL: new Map([[streamB.url, {}]]),
-    })
+    sw.setViews(fullscreenViewContentMap(2, 2, streamB), makeStreams(streamB))
 
     // No new view is created: the already-running streamB actor is reused and
     // repositioned to span the whole wall.
@@ -1063,11 +1079,9 @@ describe('StreamWindow.setViews expanding a view to fill the wall (issue #362)',
     sw.views = new Map([[1, expanding.actor]])
     sw.createView = vi.fn()
 
-    sw.setViews(
-      fullscreenViewContentMap(1, 1, stream),
-      { byURL: new Map([[stream.url, {}]]) },
-      { fillWall: true },
-    )
+    sw.setViews(fullscreenViewContentMap(1, 1, stream), makeStreams(stream), {
+      fillWall: true,
+    })
 
     expect(expanding.send).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1116,7 +1130,7 @@ describe('StreamWindow.setViews stretched live-wall tiles', () => {
         ['0', streamA],
         ['1', streamA],
       ]),
-      { byURL: new Map([[streamA.url, {}]]) },
+      makeStreams(streamA),
     )
 
     expect(sw.createView).not.toHaveBeenCalled()
@@ -1169,11 +1183,9 @@ describe('StreamWindow.setViews parking unused views during a fullscreen expansi
     ])
     sw.createView = vi.fn()
 
-    sw.setViews(
-      fullscreenViewContentMap(2, 2, streamB),
-      { byURL: new Map([[streamB.url, {}]]) },
-      { parkUnused: true },
-    )
+    sw.setViews(fullscreenViewContentMap(2, 2, streamB), makeStreams(streamB), {
+      parkUnused: true,
+    })
 
     // The non-focused actor survives instead of being stopped/disposed...
     expect(other.stop).not.toHaveBeenCalled()
@@ -1228,23 +1240,16 @@ describe('StreamWindow.setViews parking unused views during a fullscreen expansi
     sw.createView = vi.fn()
 
     // Expand: `other` is parked instead of disposed.
-    sw.setViews(
-      fullscreenViewContentMap(2, 2, streamB),
-      { byURL: new Map([[streamB.url, {}]]) },
-      { parkUnused: true },
-    )
+    sw.setViews(fullscreenViewContentMap(2, 2, streamB), makeStreams(streamB), {
+      parkUnused: true,
+    })
 
     // Collapse: the normal per-cell layout is restored.
     const viewContentMap: ViewContentMap = new Map([
       ['0', streamA],
       ['1', streamB],
     ])
-    sw.setViews(viewContentMap, {
-      byURL: new Map([
-        [streamA.url, {}],
-        [streamB.url, {}],
-      ]),
-    })
+    sw.setViews(viewContentMap, makeStreams(streamA, streamB))
 
     // The parked actor is reused for its original space instead of a new
     // view being created for it (which would show a reload/black flash).
@@ -1289,16 +1294,14 @@ describe('StreamWindow.setViews parking unused views during a fullscreen expansi
     ])
     sw.createView = vi.fn()
 
-    sw.setViews(
-      fullscreenViewContentMap(2, 2, streamB),
-      { byURL: new Map([[streamB.url, {}]]) },
-      { parkUnused: true },
-    )
+    sw.setViews(fullscreenViewContentMap(2, 2, streamB), makeStreams(streamB), {
+      parkUnused: true,
+    })
 
     // Collapse, but the cell `other` used to occupy was cleared while
     // expanded: the normal layout no longer has any box for streamA.
     const viewContentMap: ViewContentMap = new Map([['1', streamB]])
-    sw.setViews(viewContentMap, { byURL: new Map([[streamB.url, {}]]) })
+    sw.setViews(viewContentMap, makeStreams(streamB))
 
     // The parked actor is genuinely no longer needed, so it is torn down
     // instead of being parked forever.
@@ -1340,11 +1343,9 @@ describe('StreamWindow parking pauses playback when pauseParkedViews is enabled 
     ])
     sw.createView = vi.fn()
 
-    sw.setViews(
-      fullscreenViewContentMap(2, 2, streamB),
-      { byURL: new Map([[streamB.url, {}]]) },
-      { parkUnused: true },
-    )
+    sw.setViews(fullscreenViewContentMap(2, 2, streamB), makeStreams(streamB), {
+      parkUnused: true,
+    })
 
     expect(other.send).toHaveBeenCalledWith({ type: 'PAUSE' })
   })
@@ -1375,11 +1376,9 @@ describe('StreamWindow parking pauses playback when pauseParkedViews is enabled 
     ])
     sw.createView = vi.fn()
 
-    sw.setViews(
-      fullscreenViewContentMap(2, 2, streamB),
-      { byURL: new Map([[streamB.url, {}]]) },
-      { parkUnused: true },
-    )
+    sw.setViews(fullscreenViewContentMap(2, 2, streamB), makeStreams(streamB), {
+      parkUnused: true,
+    })
 
     expect(other.send).not.toHaveBeenCalledWith({ type: 'PAUSE' })
   })
@@ -1412,11 +1411,9 @@ describe('StreamWindow parking pauses playback when pauseParkedViews is enabled 
     sw.createView = vi.fn()
 
     // Expand: `other` is parked and paused.
-    sw.setViews(
-      fullscreenViewContentMap(2, 2, streamB),
-      { byURL: new Map([[streamB.url, {}]]) },
-      { parkUnused: true },
-    )
+    sw.setViews(fullscreenViewContentMap(2, 2, streamB), makeStreams(streamB), {
+      parkUnused: true,
+    })
     expect(other.send).toHaveBeenCalledWith({ type: 'PAUSE' })
 
     // Collapse: the normal per-cell layout is restored, reusing `other`.
@@ -1424,12 +1421,7 @@ describe('StreamWindow parking pauses playback when pauseParkedViews is enabled 
       ['0', streamA],
       ['1', streamB],
     ])
-    sw.setViews(viewContentMap, {
-      byURL: new Map([
-        [streamA.url, {}],
-        [streamB.url, {}],
-      ]),
-    })
+    sw.setViews(viewContentMap, makeStreams(streamA, streamB))
 
     expect(other.send).toHaveBeenCalledWith({ type: 'RESUME' })
   })
@@ -1452,9 +1444,7 @@ describe('StreamWindow parking pauses playback when pauseParkedViews is enabled 
     sw.createView = vi.fn()
 
     // Ordinary re-display of an already-running, never-parked view.
-    sw.setViews(new Map([['0', streamA]]), {
-      byURL: new Map([[streamA.url, {}]]),
-    })
+    sw.setViews(new Map([['0', streamA]]), makeStreams(streamA))
 
     expect(actor.send).not.toHaveBeenCalledWith({ type: 'RESUME' })
   })

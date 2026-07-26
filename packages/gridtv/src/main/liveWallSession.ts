@@ -6,7 +6,6 @@ import {
   type LiveWallSlotState,
   type StreamDataContent,
   type StreamList,
-  type StreamwallState,
   type StreamWindowConfig,
   type TwitchLiveStatus,
   type ViewContentMap,
@@ -37,10 +36,12 @@ import {
 import log from './logger'
 import { initializeViewsState } from './viewsStateInit'
 
-export type LiveWallStateProjection = Pick<
-  StreamwallState,
-  'config' | 'wallSlots' | 'fullscreenViewIdx' | 'fullscreenChatVisible'
->
+export interface LiveWallStateProjection {
+  config: StreamWindowConfig
+  wallSlots: LiveWallSlotState[]
+  fullscreenViewIdx: number | null
+  fullscreenChatVisible: boolean
+}
 
 /**
  * The Electron-facing operations needed by live-wall state transitions.

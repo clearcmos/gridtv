@@ -70,6 +70,11 @@ export class PlaylistScheduler {
   private resolve(playlist: PlaylistConfig) {
     const cursor = this.cursors.get(playlist.view) ?? 0
     const url = playlist.urls[cursor % playlist.urls.length]
+    if (url === undefined) {
+      this.pending.delete(playlist)
+      log.warn(`Playlist for view ${playlist.view}: no URLs configured`)
+      return
+    }
     const streamId = this.deps.resolveStreamId(url)
     if (streamId === undefined) {
       this.pending.add(playlist)

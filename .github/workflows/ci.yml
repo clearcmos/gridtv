@@ -94,6 +94,33 @@ jobs:
       - uses: ./.github/actions/setup
       - run: npm test
 
+  coverage:
+    name: Coverage
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: npm run test:coverage
+
+  package:
+    name: Package (Linux)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: npm -w packages/gridtv run package
+      - run: npm -w packages/gridtv run smoke:package:linux
+
   # Reviews the dependency diff of a PR for known vulnerabilities.
   dependency-review:
     name: Dependency review
@@ -134,7 +161,8 @@ jobs:
   ci-ok:
     name: CI OK
     if: ${{ !cancelled() }}
-    needs: [changes, checks, test, dependency-review, actionlint]
+    needs:
+      [changes, checks, test, coverage, package, dependency-review, actionlint]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

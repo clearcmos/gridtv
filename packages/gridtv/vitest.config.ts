@@ -20,9 +20,11 @@ import { defineConfig } from 'vitest/config'
 // (see OverlayViewTile.tsx's TailSpin import) rather than extending this fix
 // to a third dependency.
 export default defineConfig({
-  esbuild: {
-    jsx: 'automatic',
-    jsxImportSource: 'preact',
+  oxc: {
+    jsx: {
+      runtime: 'automatic',
+      importSource: 'preact',
+    },
   },
   resolve: {
     mainFields: ['browser', 'module', 'main'],
@@ -32,6 +34,26 @@ export default defineConfig({
     },
   },
   test: {
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.test.{ts,tsx}',
+        'src/**/*.d.ts',
+        '**/gridtv-shared/**',
+        // These process bootstrap files are exercised by the packaged startup
+        // smoke test rather than imported into a unit-test process.
+        'src/main/index.ts',
+        'src/preload/sentryPreload.ts',
+        'src/renderer/background.tsx',
+        'src/renderer/overlay.tsx',
+      ],
+      reporter: ['text', 'json-summary'],
+      thresholds: {
+        branches: 80,
+        lines: 80,
+      },
+    },
     server: {
       deps: {
         inline: [/react-icons/, /styled-components/],

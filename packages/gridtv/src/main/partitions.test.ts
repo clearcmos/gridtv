@@ -36,7 +36,9 @@ function fakeSession() {
     },
     // Overridable per test; the default reports every hostname as public so
     // tests that don't care about DNS classification aren't forced to stub it.
-    resolveHost: async (): Promise<{
+    resolveHost: async (
+      _host: string,
+    ): Promise<{
       endpoints: { address: string; family: 'ipv4' | 'ipv6' }[]
     }> => ({ endpoints: [{ address: '93.184.216.34', family: 'ipv4' }] }),
     request(permission: string): boolean {

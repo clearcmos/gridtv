@@ -1,7 +1,7 @@
 name: PR title
 
 # PRs are squash-merged, so the PR title becomes the commit subject on main.
-# Enforce Conventional Commits so the history and changelogs stay consistent.
+# Enforce Conventional Commits so the developer-facing history stays useful.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]

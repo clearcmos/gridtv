@@ -31,8 +31,8 @@ jobs:
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck
-      - name: Test
-        run: npm test
+      - name: Test and coverage
+        run: npm run test:coverage
 
   publish:
     name: Publish (${{ matrix.platform.name }})

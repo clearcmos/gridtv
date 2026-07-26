@@ -81,7 +81,7 @@ describe('Twitch live-status lookup', () => {
     )
     await expect(lookup(['lacy'])).resolves.toEqual(new Map([['lacy', true]]))
     expect(mockedFetch).toHaveBeenCalledTimes(1)
-    const request = JSON.parse(String(mockedFetch.mock.calls[0][1]?.body)) as {
+    const request = JSON.parse(String(mockedFetch.mock.calls[0]![1]?.body)) as {
       query: string
     }
     expect(request.query).toContain('channel1: user(login: "offline_name")')

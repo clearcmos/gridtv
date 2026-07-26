@@ -116,7 +116,7 @@ describe('stateDiff round-trips', () => {
   it('round-trips a stream list reorder as moves, not delete+insert', () => {
     const prev = makeState()
     const next = makeState({
-      streams: [prev.streams[2], prev.streams[0], prev.streams[1]],
+      streams: [prev.streams[2]!, prev.streams[0]!, prev.streams[1]!],
     })
     const delta = expectRoundTrip(prev, next)
     const streamsDelta = (delta as { streams: Record<string, unknown> }).streams
@@ -135,9 +135,9 @@ describe('stateDiff round-trips', () => {
     const prev = makeState()
     const next = makeState({
       streams: [
-        { ...prev.streams[1], label: 'renamed-b' },
-        prev.streams[0],
-        prev.streams[2],
+        { ...prev.streams[1]!, label: 'renamed-b' },
+        prev.streams[0]!,
+        prev.streams[2]!,
       ],
     })
     expectRoundTrip(prev, next)
@@ -146,7 +146,7 @@ describe('stateDiff round-trips', () => {
   it('round-trips a nested views state change', () => {
     const prev = makeState()
     const next = makeState({
-      views: [makeView(0, { state: { displaying: 'error' } }), prev.views[1]],
+      views: [makeView(0, { state: { displaying: 'error' } }), prev.views[1]!],
     })
     expectRoundTrip(prev, next)
   })
@@ -157,11 +157,11 @@ describe('stateDiff round-trips', () => {
     })
     const next = makeState({
       views: [
-        prev.views[0],
+        prev.views[0]!,
         makeView(1, {
-          context: { ...prev.views[1].context, error: 'boom' },
+          context: { ...prev.views[1]!.context, error: 'boom' },
         }),
-        prev.views[2],
+        prev.views[2]!,
       ],
     })
     const delta = expectRoundTrip(prev, next)
@@ -188,8 +188,8 @@ describe('stateDiff round-trips', () => {
     const prev = makeState()
     const next = makeState({
       config: { ...prev.config, cols: 3, rows: 3 },
-      streams: [prev.streams[1], makeStream('d'), prev.streams[0]],
-      views: [makeView(0, { state: { displaying: 'error' } }), prev.views[1]],
+      streams: [prev.streams[1]!, makeStream('d'), prev.streams[0]!],
+      views: [makeView(0, { state: { displaying: 'error' } }), prev.views[1]!],
       streamdelay: {
         isConnected: false,
         delaySeconds: 0,

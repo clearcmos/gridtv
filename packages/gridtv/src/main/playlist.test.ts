@@ -123,6 +123,20 @@ describe('PlaylistScheduler', () => {
     expect(deps.setViewStream).not.toHaveBeenCalled()
   })
 
+  test('ignores a malformed playlist entry with no URLs', () => {
+    const deps = makeDeps({})
+    const scheduler = new PlaylistScheduler(
+      [{ view: 0, interval: 10, urls: [] }],
+      deps,
+    )
+
+    scheduler.start()
+    vi.advanceTimersByTime(10_000)
+
+    expect(deps.resolveStreamId).not.toHaveBeenCalled()
+    expect(deps.setViewStream).not.toHaveBeenCalled()
+  })
+
   describe('retryPending', () => {
     test('resolves a view whose URL only becomes available after startup', () => {
       const streamIdByURL: Record<string, string | undefined> = { a: undefined }

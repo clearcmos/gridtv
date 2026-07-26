@@ -834,7 +834,7 @@ describe('viewStateMachine loadPage navigation', () => {
 
     await vi.waitFor(() => expect(loadURL).toHaveBeenCalled())
 
-    const target = new URL(loadURL.mock.calls[0][0])
+    const target = new URL(loadURL.mock.calls[0]![0])
     expect(target.origin).toBe('https://player.twitch.tv')
     expect(target.searchParams.get('channel')).toBe('some_channel')
     expect(target.searchParams.get('parent')).toBe('player.twitch.tv')

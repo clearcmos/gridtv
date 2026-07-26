@@ -81,8 +81,8 @@ describe('addLayoutPreset', () => {
     const result = addLayoutPreset(full, preset('newest'))
 
     expect(result).toHaveLength(MAX_LAYOUT_PRESETS)
-    expect(result[result.length - 1].id).toBe('newest')
-    expect(result[0].id).toBe('p1')
+    expect(result[result.length - 1]!.id).toBe('newest')
+    expect(result[0]!.id).toBe('p1')
     expect(result.some((p) => p.id === 'p0')).toBe(false)
   })
 })

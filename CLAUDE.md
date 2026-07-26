@@ -71,6 +71,7 @@ npm run start:app           # run the Electron app (dev)
 npm run start:app -- --help # list all config options
 npm run typecheck           # tsc --noEmit across workspaces
 npm test                    # vitest across workspaces
+npm run test:coverage       # tests plus 80% line/branch gates
 npm run lint                # eslint
 npm run format:check        # prettier check (format to write)
 ```
@@ -140,3 +141,50 @@ Not renamed (intentional):
 - Wire-protocol / fixture values: the `'streamwall'` `AuthTokenKind` (control
   uplink protocol value) and `'streamwall'` inputs in `colors.test.ts` (their
   expected hash outputs are computed for that exact string).
+
+## Engineering decisions
+
+### 2026-07-25: Coverage and integration verification
+
+- Both workspaces enforce at least 80 percent line and branch coverage.
+- The app coverage run excludes `src/main/index.ts`,
+  `src/preload/sentryPreload.ts`, `src/renderer/background.tsx`, and
+  `src/renderer/overlay.tsx`, which are side-effect-only process entry points
+  that cannot be safely imported into a unit-test process. It also excludes the
+  separately measured shared workspace. `src/main/bootstrap.ts` directly tests
+  final startup wiring.
+- Normal CI packages the Linux app and launches that packaged executable under
+  Xvfb through initial window geometry. This is the integration check for Forge,
+  Vite, Electron entry points, preload loading, and renderer startup.
+- Declaration files, type-only modules, barrel exports, and thin renderer or
+  preload entry points do not need artificial one-file-per-module tests. Their
+  contracts are covered by TypeScript, importing behavior tests, packaging, and
+  the packaged startup smoke test.
+
+### 2026-07-25: Changelog policy
+
+- GitHub release notes are the user-facing changelog.
+- Conventional Commit subjects on `main` are the developer-facing change
+  history.
+- Do not maintain a duplicate `CHANGELOG.md`. Every public release must include
+  curated GitHub release notes that summarize user-visible changes, fixes,
+  compatibility notes, and known limitations.
+
+### 2026-07-25: Dependency install and audit policy
+
+- npm install scripts are approved only at reviewed, exact versions in the root
+  `allowScripts` policy. A dependency update that changes one of those versions
+  must review and update its approval deliberately.
+- Production dependency audit findings block a release.
+- The current Electron Forge build chain has known development-only audit
+  findings without a non-breaking upstream fix. They are accepted for the
+  pinned lockfile as build-environment risk, not shipped runtime risk, and must
+  be re-reviewed on dependency updates. Do not use `npm audit fix --force` to
+  bypass that review.
+
+## Release process
+
+Follow [`docs/releasing.md`](docs/releasing.md). A release is not ready from
+automated CI alone: the version, signing policy, manual Twitch acceptance pass,
+published artifacts, release notes, and updater behavior all require an
+explicit release-owner decision.

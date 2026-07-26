@@ -599,7 +599,12 @@ export default class StreamWindow extends EventEmitter<StreamWindowEventMap> {
     if (this.win.isDestroyed()) {
       return
     }
-    let [width, height] = this.win.getContentSize()
+    const [contentWidth, contentHeight] = this.win.getContentSize()
+    if (contentWidth === undefined || contentHeight === undefined) {
+      return
+    }
+    let width = contentWidth
+    let height = contentHeight
     if (this.win.isMaximized() && !this.win.isFullScreen()) {
       const contentBounds = this.win.getContentBounds()
       const workArea = selectMaximizedWorkArea(
