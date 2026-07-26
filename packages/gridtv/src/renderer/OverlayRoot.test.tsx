@@ -540,6 +540,49 @@ describe('self-contained wall controls', () => {
     expect(onControl).toHaveBeenCalledTimes(2)
   })
 
+  test('F toggles fullscreen after adjusting the hovered stream volume', () => {
+    const onControl = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    act(() => {
+      render(
+        <Overlay
+          config={makeConfig(1)}
+          views={[makeView(0, 'view-0')]}
+          streams={[makeStream('view-0')]}
+          fullscreenViewIdx={null}
+          onControl={onControl}
+        />,
+        container!,
+      )
+    })
+
+    const tile = container.querySelector('[data-wall-tile]')!
+    const slider = container.querySelector<HTMLInputElement>(
+      '[aria-label="Stream volume"]',
+    )!
+    act(() => {
+      tile.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))
+    })
+    act(() => {
+      slider.focus()
+      slider.value = '0.5'
+      slider.dispatchEvent(new Event('input', { bubbles: true }))
+      slider.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'f', bubbles: true }),
+      )
+      slider.dispatchEvent(
+        new KeyboardEvent('keyup', { key: 'f', bubbles: true }),
+      )
+    })
+
+    expect(onControl).toHaveBeenCalledWith({
+      type: 'set-wall-fullscreen',
+      viewIdx: 0,
+      fullscreen: true,
+    })
+  })
+
   test('E toggles mute for the hovered stream', () => {
     const onControl = vi.fn()
     const view = makeView(0, 'view-0')

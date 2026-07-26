@@ -248,14 +248,14 @@ export function Overlay({
       shift: event.shiftKey,
       isAutoRepeat: event.repeat,
     })
-    const targetIsEditable = (event: KeyboardEvent) =>
+    const targetOwnsLetterKeys = (event: KeyboardEvent) =>
       event.target instanceof HTMLElement &&
-      (event.target.matches('input, textarea, select') ||
+      (event.target.matches('input:not([type="range"]), textarea, select') ||
         event.target.isContentEditable)
 
     const handleKeyDown = (event: KeyboardEvent) => {
       const input = shortcutInput(event, 'keyDown')
-      if (!wallShortcutForInput(input, !targetIsEditable(event))) {
+      if (!wallShortcutForInput(input, !targetOwnsLetterKeys(event))) {
         return
       }
       event.preventDefault()
